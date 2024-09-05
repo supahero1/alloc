@@ -295,6 +295,14 @@ AllocGetPageSize(
 	);
 
 
+/* `AllocGetDefaultBlockSize` - Get the library's default block size.
+ */
+_const_func_ alloc_t
+AllocGetDefaultBlockSize(
+	void
+	);
+
+
 /* `AllocAllocVirtual` - Allocate virtual memory.
  *
  * @param `Size` The size of the memory that will be allocated.
@@ -443,6 +451,25 @@ AllocCreateHandle(
 	);
 
 
+/* `AllocCloneHandle` - Clone an allocator handle.
+ *
+ * @param `Source` The handle that you want to clone.
+ *
+ * @param `Handle` The handle that will be created.
+ *
+ * The cloned handle will have the same parameters as the source handle, but no
+ * memory allocated (yet). It does not share the flags.
+ *
+ * Every call to `AllocCloneHandle` must be paired with a call to
+ * `AllocDestroyHandle`.
+ */
+extern void
+AllocCloneHandle(
+	_opaque_ AllocHandle* Source,
+	_opaque_ AllocHandle* Handle
+	);
+
+
 /* `AllocDestroyHandle` - Destroy an allocator handle.
  *
  * @param `Handle` The handle that you want to destroy. It must have been
@@ -497,6 +524,23 @@ AllocDestroyHandle(
 extern _alloc_func_ const AllocState*
 AllocAllocState(
 	_in_ AllocStateInfo* Info
+	);
+
+
+/* `AllocCloneState` - Clone a library state.
+ *
+ * @param `Source` The state that you want to clone.
+ *
+ * @return The cloned state.
+ *
+ * See `AllocCloneHandle` for more information.
+ *
+ * Every call to `AllocCloneState` must be paired with a call to
+ * `AllocFreeState`.
+ */
+extern _alloc_func_ const AllocState*
+AllocCloneState(
+	_in_ AllocState* Source
 	);
 
 

@@ -739,6 +739,15 @@ AllocGetPageSize(
 }
 
 
+_const_func_ alloc_t
+AllocGetDefaultBlockSize(
+	void
+	)
+{
+	return ALLOC_DEFAULT_BLOCK_SIZE;
+}
+
+
 Private void*
 AllocAlloc1Func(
 	AllocHandleInternal* Handle,
@@ -1210,7 +1219,7 @@ AllocHandleIsVirtual(
 	_in_ AllocHandleInternal* Handle
 	)
 {
-	return !Handle->AllocLimit;
+	return !Handle->BlockSize;
 }
 
 
@@ -1220,7 +1229,7 @@ AllocCreateHandle(
 	_opaque_ AllocHandle* Handle
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 #if ALLOC_THREADS == 1
 	AllocMutexInit(&HandleInternal->Mutex);
@@ -1346,11 +1355,31 @@ AllocCreateHandle(
 
 
 void
+AllocCloneHandle(
+	_opaque_ AllocHandle* Source,
+	_opaque_ AllocHandle* Handle
+	)
+{
+	AllocHandleInternal* SourceInternal = (void*) Source;
+
+	AllocHandleInfo Info =
+	{
+		.AllocSize = SourceInternal->AllocSize,
+		.BlockSize = SourceInternal->BlockSize,
+		/* Not quite right, but not wrong either. */
+		.Alignment = SourceInternal->Padding
+	};
+
+	AllocCreateHandle(&Info, Handle);
+}
+
+
+void
 AllocDestroyHandle(
 	_opaque_ AllocHandle* Handle
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	if(HandleInternal->Head)
 	{
@@ -1421,6 +1450,38 @@ AllocAllocState(
 }
 
 
+_alloc_func_ const AllocState*
+AllocCloneState(
+	_in_ AllocState* Source
+	)
+{
+	alloc_t HandleCount = Source->HandleCount;
+	alloc_t TotalSize = sizeof(AllocState) + sizeof(AllocHandle) * HandleCount;
+
+	AllocState* State = AllocAllocVirtual(TotalSize);
+	if(!State)
+	{
+		return NULL;
+	}
+
+	(void) memcpy(State, Source, TotalSize);
+
+	for(alloc_t i = 0; i < HandleCount; ++i)
+	{
+		AllocHandleInternal* Handle = (void*) &Source->Handles[i];
+
+		Handle->Allocators = 0;
+		Handle->Allocations = 0;
+
+		Handle->Flags = 0;
+
+		Handle->Head = NULL;
+	}
+
+	return State;
+}
+
+
 void
 AllocFreeState(
 	_opaque_ AllocState* State
@@ -1465,7 +1526,7 @@ AllocHandleLockH(
 	_opaque_ AllocHandle* Handle
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	ALLOC_LOCK(&HandleInternal->Mutex);
 }
@@ -1476,7 +1537,7 @@ AllocHandleUnlockH(
 	_opaque_ AllocHandle* Handle
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	ALLOC_UNLOCK(&HandleInternal->Mutex);
 }
@@ -1500,7 +1561,7 @@ AllocHandleSetFlagsUH(
 	AllocHandleFlag Flags
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	HandleInternal->Flags = Flags;
 }
@@ -1524,7 +1585,7 @@ AllocHandleAddFlagsUH(
 	AllocHandleFlag Flags
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	HandleInternal->Flags |= Flags;
 }
@@ -1548,7 +1609,7 @@ AllocHandleDelFlagsUH(
 	AllocHandleFlag Flags
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	HandleInternal->Flags &= ~Flags;
 }
@@ -1574,7 +1635,7 @@ AllocHandleGetFlagsUH(
 	_opaque_ AllocHandle* Handle
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	return HandleInternal->Flags;
 }
@@ -1622,7 +1683,7 @@ AllocAllocUH(
 	int Zero
 	)
 {
-	AllocHandleInternal* HandleInternal = (AllocHandleInternal*) Handle;
+	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	return HandleInternal->AllocFunc(HandleInternal, Size, Zero);
 }
