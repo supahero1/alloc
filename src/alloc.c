@@ -2,13 +2,6 @@
 extern "C" {
 #endif
 
-#ifndef _WIN32
-	#if !defined(_GNU_SOURCE) && defined(_FEATURES_H)
-		#error "alloc.c was included after features.h"
-	#endif
-	#define _GNU_SOURCE
-#endif
-
 #include "../include/alloc_std.h"
 #include "../include/debug.h"
 
@@ -128,85 +121,8 @@ extern "C" {
 	}
 
 
-	_alloc_func_ void*
-	AllocReallocVirtual(
-		_opaque_ void* Ptr,
-		alloc_t OldSize,
-		alloc_t NewSize
-		)
-	{
-		if(!NewSize)
-		{
-			AllocFreeVirtual(Ptr, OldSize);
-			return NULL;
-		}
-
-		if(!Ptr)
-		{
-			return AllocAllocVirtual(NewSize);
-		}
-
-		void* NewPtr = AllocAllocVirtual(NewSize);
-		if(!NewPtr)
-		{
-			return NULL;
-		}
-
-		alloc_t CopySize = ALLOC_MIN(OldSize, NewSize);
-		memcpy(NewPtr, Ptr, CopySize);
-
-		AllocFreeVirtual(Ptr, OldSize);
-
-		return NewPtr;
-	}
-
-
-	_alloc_func_ void*
-	AllocReallocVirtualAligned(
-		_opaque_ void* RealPtr,
-		alloc_t OldSize,
-		alloc_t NewSize,
-		alloc_t Alignment,
-		_out_ void** NewPtr
-		)
-	{
-		if(!NewSize)
-		{
-			AllocFreeVirtualAligned(RealPtr, OldSize, Alignment);
-			*NewPtr = NULL;
-			return NULL;
-		}
-
-		if(!RealPtr)
-		{
-			return AllocAllocVirtualAligned(NewSize, Alignment, NewPtr);
-		}
-
-		void* NewRealPtr = AllocAllocVirtualAligned(
-			NewSize, Alignment, NewPtr);
-		if(!NewRealPtr)
-		{
-			return NULL;
-		}
-
-		void* AlignedOldPtr = ALLOC_ALIGN(RealPtr, Alignment);
-		void* AlignedNewPtr = *NewPtr;
-
-		alloc_t CopySize = ALLOC_MIN(OldSize, NewSize);
-		memcpy(AlignedNewPtr, AlignedOldPtr, CopySize);
-
-		AllocFreeVirtualAligned(RealPtr, OldSize, Alignment);
-
-		return NewRealPtr;
-	}
-
-
 #else
 	#include <sys/mman.h>
-
-	#ifndef MREMAP_MAYMOVE
-		#define MREMAP_MAYMOVE 1
-	#endif
 
 
 	_alloc_func_ void*
@@ -296,82 +212,81 @@ extern "C" {
 	}
 
 
-	_alloc_func_ void*
-	AllocReallocVirtual(
-		_opaque_ void* Ptr,
-		alloc_t OldSize,
-		alloc_t NewSize
-		)
-	{
-		if(!NewSize)
-		{
-			AllocFreeVirtual(Ptr, OldSize);
-			return NULL;
-		}
-
-		if(!Ptr)
-		{
-			return AllocAllocVirtual(NewSize);
-		}
-
-		void* NewPtr = mremap((void*) Ptr, OldSize, NewSize, MREMAP_MAYMOVE);
-		if(NewPtr == MAP_FAILED)
-		{
-			return NULL;
-		}
-
-		return NewPtr;
-	}
-
-
-	_alloc_func_ void*
-	AllocReallocVirtualAligned(
-		_opaque_ void* RealPtr,
-		alloc_t OldSize,
-		alloc_t NewSize,
-		alloc_t Alignment,
-		_out_ void** NewPtr
-		)
-	{
-		if(!NewSize)
-		{
-			AllocFreeVirtualAligned(RealPtr, OldSize, Alignment);
-			*NewPtr = NULL;
-			return NULL;
-		}
-
-		if(!RealPtr)
-		{
-			return AllocAllocVirtualAligned(NewSize, Alignment, NewPtr);
-		}
-
-		/* You know, in theory we could do a mremap here and check if the result
-		 * is aligned properly, but that would work only if `NewSize` is double
-		 * `OldSize` and overall the chances of a good outcome are slim, so do
-		 * not bother.
-		 */
-
-		void* NewRealPtr = AllocAllocVirtualAligned(
-			NewSize, Alignment, NewPtr);
-		if(!NewRealPtr)
-		{
-			return NULL;
-		}
-
-		void* AlignedOldPtr = ALLOC_ALIGN(RealPtr, Alignment);
-		void* AlignedNewPtr = *NewPtr;
-
-		alloc_t CopySize = ALLOC_MIN(OldSize, NewSize);
-		memcpy(AlignedNewPtr, AlignedOldPtr, CopySize);
-
-		AllocFreeVirtualAligned(RealPtr, OldSize, Alignment);
-
-		return NewRealPtr;
-	}
-
-
 	#include <unistd.h>
 #endif
+
+
+_alloc_func_ void*
+AllocReallocVirtual(
+	_opaque_ void* Ptr,
+	alloc_t OldSize,
+	alloc_t NewSize
+	)
+{
+	if(!NewSize)
+	{
+		AllocFreeVirtual(Ptr, OldSize);
+		return NULL;
+	}
+
+	if(!Ptr)
+	{
+		return AllocAllocVirtual(NewSize);
+	}
+
+	void* NewPtr = AllocAllocVirtual(NewSize);
+	if(!NewPtr)
+	{
+		return NULL;
+	}
+
+	alloc_t CopySize = ALLOC_MIN(OldSize, NewSize);
+	memcpy(NewPtr, Ptr, CopySize);
+
+	AllocFreeVirtual(Ptr, OldSize);
+
+	return NewPtr;
+}
+
+
+_alloc_func_ void*
+AllocReallocVirtualAligned(
+	_opaque_ void* RealPtr,
+	alloc_t OldSize,
+	alloc_t NewSize,
+	alloc_t Alignment,
+	_out_ void** NewPtr
+	)
+{
+	if(!NewSize)
+	{
+		AllocFreeVirtualAligned(RealPtr, OldSize, Alignment);
+		*NewPtr = NULL;
+		return NULL;
+	}
+
+	if(!RealPtr)
+	{
+		return AllocAllocVirtualAligned(NewSize, Alignment, NewPtr);
+	}
+
+	void* NewRealPtr = AllocAllocVirtualAligned(
+		NewSize, Alignment, NewPtr);
+	if(!NewRealPtr)
+	{
+		return NULL;
+	}
+
+	void* AlignedOldPtr = ALLOC_ALIGN(RealPtr, Alignment);
+	void* AlignedNewPtr = *NewPtr;
+
+	alloc_t CopySize = ALLOC_MIN(OldSize, NewSize);
+	memcpy(AlignedNewPtr, AlignedOldPtr, CopySize);
+
+	AllocFreeVirtualAligned(RealPtr, OldSize, Alignment);
+
+	return NewRealPtr;
+}
 
 
 #if ALLOC_THREADS == 1
