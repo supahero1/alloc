@@ -203,7 +203,10 @@ extern "C" {
 
 #else
 	#include <sys/mman.h>
-	#include <linux/mman.h>
+
+	#ifndef MREMAP_MAYMOVE
+		#define MREMAP_MAYMOVE 1
+	#endif
 
 
 	_alloc_func_ void*

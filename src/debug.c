@@ -7,7 +7,10 @@ extern "C" {
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <execinfo.h>
+
+#ifdef __linux__
+	#include <execinfo.h>
+#endif
 
 
 Private void
@@ -15,6 +18,7 @@ PrintStackTrace(
 	void
 	)
 {
+#ifdef __linux__
 	void* Buffer[256];
 	int Count = backtrace(Buffer, 256);
 	char** Symbols = backtrace_symbols(Buffer, Count);
@@ -27,6 +31,9 @@ PrintStackTrace(
 	}
 
 	free(Symbols);
+#else
+	fprintf(stderr, "Stack trace not supported on this platform\n");
+#endif
 }
 
 
