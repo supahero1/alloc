@@ -1,6 +1,21 @@
-.PHONY: all
-all: main
-	./main
+CFLAGS = -Wall -Wextra -Werror -Wno-address-of-packed-member
 
-main: main.c alloc.c Makefile
-	gcc -o main main.c alloc.c -O3 -Wall -Wextra
+ifeq ($(RELEASE), 1)
+CFLAGS += -O3 -DNDEBUG
+else
+CFLAGS += -O0 -g3 -ggdb
+endif
+
+.PHONY: all
+all: bin/liballoc.so
+	$(MAKE) -C dev
+
+bin:
+	mkdir bin
+
+.PHONY: clean
+clean:
+	$(RM) -r bin
+
+bin/liballoc.so: src/alloc.c src/debug.c | bin
+	gcc -shared -fPIC $(CFLAGS) -o $@ $^
