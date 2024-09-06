@@ -1,4 +1,13 @@
-CFLAGS = -Wall -Wextra -Wno-address-of-packed-member
+.EXPORT_ALL_VARIABLES:
+
+CFLAGS := -Wall -Wextra -Wno-address-of-packed-member
+
+ifeq ($(M32), 1)
+CC := gcc-11
+CFLAGS += -m32
+else
+CC := gcc
+endif
 
 ifeq ($(RELEASE), 1)
 CFLAGS += -O3 -DNDEBUG
@@ -10,12 +19,27 @@ ifeq ($(OS), Windows_NT)
 OUTPUT := bin/liballoc.dll
 CFLAGS += -Wl,--out-implib,bin/liballoc.lib
 else
+
+ifeq ($(shell uname), Darwin)
+OUTPUT := bin/liballoc.dylib
+LDFLAGS := -dynamiclib
+else
 OUTPUT := bin/liballoc.so
+LDFLAGS := -shared -fPIC
+endif
+
 endif
 
 .PHONY: all
-all: $(OUTPUT)
-	$(MAKE) -C dev
+all: test
+
+.PHONY: test
+test: $(OUTPUT)
+	cd dev; $(MAKE) test
+
+.PHONY: bench
+bench: $(OUTPUT)
+	cd dev; $(MAKE) bench
 
 bin:
 	mkdir bin
@@ -25,4 +49,4 @@ clean:
 	$(RM) -r bin
 
 $(OUTPUT): src/alloc.c src/debug.c | bin
-	gcc -shared -fPIC $(CFLAGS) -o $@ $^
+	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $^
