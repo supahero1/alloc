@@ -10,13 +10,11 @@ This is a custom memory allocator I wrote in C. Its features are:
 
 5. Decentralized, allowing for scalability and fragmentation resistance.
 
-6. Simpler and faster than all dlmalloc offsprings. [^1]
+6. Simpler, faster, using less kernel time than all dlmalloc offsprings. [^1]
 
-[^1]: 33-50% faster on Linux, ~75% faster on Windows, but speed may vary between different environments and workloads.
+[^1]: 33-50% faster on Linux/MacOS, ~75% faster on Windows, but speed may vary between different environments and workloads. The kernel time difference used to be clearly visible back when `time` was used to measure the benchmark, but there have been issues with the command not working on some platforms in specific settings, so it was replaced with in-code time measuring that only takes real time into account.
 
-It supports Linux and Windows (mingw/msys), 64bit and 32bit. It does not (and simply cannot) support WebAssembly.
-
-A patch to support MacOS was already done, and it compiles, but linking issues are still there (I am not knowledgeable in `dylib` stuff).
+It supports Linux, MacOS, Windows (mingw/msys), both 64bit and 32bit. It does not (and simply cannot) support WebAssembly.
 
 ## C
 
@@ -32,4 +30,4 @@ Rust exposes really cool `GlobalAlloc` API that can be overridden. After doing s
 
 ## Contributions
 
-... are welcome. This is a very fresh, immature project, with little support for various platforms. It could use more updates.
+... are welcome. This is a very fresh, immature projects. It could use more updates.
