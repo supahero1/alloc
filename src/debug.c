@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 
-Private void
+Static void
 PrintStackTrace(
 	void
 	)

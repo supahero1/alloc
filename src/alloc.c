@@ -293,7 +293,7 @@ AllocReallocVirtualAligned(
 	#ifdef _WIN32
 
 
-		Private void
+		Static void
 		AllocMutexInit(
 			AllocMutex* Mutex
 			)
@@ -302,7 +302,7 @@ AllocReallocVirtualAligned(
 		}
 
 
-		Private void
+		Static void
 		AllocMutexDestroy(
 			AllocMutex* Mutex
 			)
@@ -311,7 +311,7 @@ AllocReallocVirtualAligned(
 		}
 
 
-		Private void
+		Static void
 		AllocMutexLock(
 			AllocMutex* Mutex
 			)
@@ -320,7 +320,7 @@ AllocReallocVirtualAligned(
 		}
 
 
-		Private void
+		Static void
 		AllocMutexUnlock(
 			AllocMutex* Mutex
 			)
@@ -332,7 +332,7 @@ AllocReallocVirtualAligned(
 	#else
 
 
-		Private void
+		Static void
 		AllocMutexInit(
 			AllocMutex* Mutex
 			)
@@ -342,7 +342,7 @@ AllocReallocVirtualAligned(
 		}
 
 
-		Private void
+		Static void
 		AllocMutexDestroy(
 			AllocMutex* Mutex
 			)
@@ -352,7 +352,7 @@ AllocReallocVirtualAligned(
 		}
 
 
-		Private void
+		Static void
 		AllocMutexLock(
 			AllocMutex* Mutex
 			)
@@ -362,7 +362,7 @@ AllocReallocVirtualAligned(
 		}
 
 
-		Private void
+		Static void
 		AllocMutexUnlock(
 			AllocMutex* Mutex
 			)
@@ -511,7 +511,7 @@ static_assert(sizeof(AllocHandle) >= sizeof(AllocHandleInternal),
 #define ALLOC_PO2(X) (UINT32_C(1) << UINT32_C(X))
 #define ALLOC_DEFAULT_BLOCK_SIZE ALLOC_PO2(23)
 
-Private AllocHandleInfo AllocDefaultHandleInfo[] =
+Static AllocHandleInfo AllocDefaultHandleInfo[] =
 (AllocHandleInfo[])
 {
 	/* The defaults. For `Alloc1` the minimum size is set so that it gets
@@ -636,7 +636,7 @@ Private AllocHandleInfo AllocDefaultHandleInfo[] =
 #endif
 };
 
-Private AllocStateInfo AllocDefaultStateInfo =
+Static AllocStateInfo AllocDefaultStateInfo =
 (AllocStateInfo)
 {
 	.Handles = AllocDefaultHandleInfo,
@@ -645,10 +645,10 @@ Private AllocStateInfo AllocDefaultStateInfo =
 };
 
 
-Private alloc_t AllocPageSize;
-Private alloc_t AllocPageSizeMask;
-Private uint32_t AllocPageSizeShift;
-Private const AllocState* AllocGlobalState;
+Static alloc_t AllocPageSize;
+Static alloc_t AllocPageSizeMask;
+Static uint32_t AllocPageSizeShift;
+Static const AllocState* AllocGlobalState;
 
 
 
@@ -657,7 +657,7 @@ Private const AllocState* AllocGlobalState;
 
 
 
-Private uint32_t
+Static uint32_t
 AllocLog2(
 	alloc_t Value
 	)
@@ -668,7 +668,7 @@ AllocLog2(
 }
 
 
-Private uint32_t
+Static uint32_t
 AllocGetNextPO2(
 	alloc_t Value
 	)
@@ -684,7 +684,7 @@ AllocGetNextPO2(
 }
 
 
-Private __attribute__((constructor)) void
+Static __attribute__((constructor)) void
 AllocLibraryInit(
 	void
 	)
@@ -692,7 +692,7 @@ AllocLibraryInit(
 #ifdef _WIN32
 	SYSTEM_INFO Info;
 	GetSystemInfo(&Info);
-	AllocPageSize = dwPageSize;
+	AllocPageSize = Info.dwPageSize;
 #else
 	AllocPageSize = getpagesize();
 #endif
@@ -710,7 +710,7 @@ AllocLibraryInit(
 }
 
 
-Private __attribute__((destructor)) void
+Static __attribute__((destructor)) void
 AllocLibraryDestroy(
 	void
 	)
@@ -748,7 +748,7 @@ AllocGetDefaultBlockSize(
 }
 
 
-Private void*
+Static void*
 AllocAlloc1Func(
 	AllocHandleInternal* Handle,
 	alloc_t Size,
@@ -844,7 +844,7 @@ AllocAlloc1Func(
 }
 
 
-Private void
+Static void
 AllocFree1Func(
 	AllocHandleInternal* Handle,
 	void* BlockPtr,
@@ -922,7 +922,7 @@ AllocFree1Func(
 }
 
 
-Private void*
+Static void*
 AllocAlloc2Func(
 	AllocHandleInternal* Handle,
 	alloc_t Size,
@@ -983,7 +983,7 @@ AllocAlloc2Func(
 }
 
 
-Private void
+Static void
 AllocFree2Func(
 	AllocHandleInternal* Handle,
 	void* BlockPtr,
@@ -1053,7 +1053,7 @@ AllocFree2Func(
 }
 
 
-Private void*
+Static void*
 AllocAlloc4Func(
 	AllocHandleInternal* Handle,
 	alloc_t Size,
@@ -1114,7 +1114,7 @@ AllocAlloc4Func(
 }
 
 
-Private void
+Static void
 AllocFree4Func(
 	AllocHandleInternal* Handle,
 	void* BlockPtr,
@@ -1184,7 +1184,7 @@ AllocFree4Func(
 }
 
 
-Private void*
+Static void*
 AllocAllocVirtualFunc(
 	AllocHandleInternal* Handle,
 	alloc_t Size,
@@ -1198,7 +1198,7 @@ AllocAllocVirtualFunc(
 }
 
 
-Private void
+Static void
 AllocFreeVirtualFunc(
 	AllocHandleInternal* Handle,
 	void* BlockPtr,
@@ -1214,7 +1214,7 @@ AllocFreeVirtualFunc(
 }
 
 
-Private int
+Static int
 AllocHandleIsVirtual(
 	_in_ AllocHandleInternal* Handle
 	)
@@ -1393,7 +1393,7 @@ AllocDestroyHandle(
 }
 
 
-Private uint32_t
+Static uint32_t
 AllocDefaultIndexFunc(
 	alloc_t Size
 	)
@@ -1641,7 +1641,7 @@ AllocHandleGetFlagsUH(
 }
 
 
-Private void*
+Static void*
 GetBasePtr(
 	AllocHandleInternal* Handle,
 	_in_ void* Ptr

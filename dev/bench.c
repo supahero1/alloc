@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <threads.h>
 
-#define OPERATIONS 0x100000
+#define OPERATIONS 0x10000
 #define THREADS 0x10
 #define POINTERS 0x80
 

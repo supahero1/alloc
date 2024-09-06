@@ -92,7 +92,7 @@ UnreachableAssertFailed("Unreachable assertion failed, at " __FILE__ ":" Stringi
 	#define AssertGE(A, B) HardenedAssertGE(A, B)
 	#define AssertUnreachable() HardenedAssertUnreachable()
 	#define LogLocation(...) HardenedLogLocation(__VA_ARGS__)
-	#define Private
+	#define Static
 #else
 	#define AssertEQ(A, B) EmptyAssertEQ(A, B)
 	#define AssertNEQ(A, B) EmptyAssertNEQ(A, B)
@@ -102,7 +102,7 @@ UnreachableAssertFailed("Unreachable assertion failed, at " __FILE__ ":" Stringi
 	#define AssertGE(A, B) EmptyAssertGE(A, B)
 	#define AssertUnreachable() EmptyAssertUnreachable()
 	#define LogLocation(...) EmptyLogLocation()
-	#define Private static
+	#define Static static
 #endif
 
 #define Fallthrough() __attribute__((fallthrough))

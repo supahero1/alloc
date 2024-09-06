@@ -24,3 +24,12 @@ For headers, `include/alloc_std.h` is the main one, containing all the functions
 
 Building the code by default will also test it. The test does not take long and also tests your default allocator (ptmalloc on linux distributions using glibc), jemalloc (if found), and mimalloc (if found), to make sure everything is consistent. There is also an option to benchmark it, but for that you have to `cd dev; make bench` by yourself. The benchmark is by default multithreaded. It used to be singlethreaded in a previous release, but nonetheless in both versions this allocator wins over dlmalloc.
 
+## C++
+
+Dude I swear to god, I tried, but this is just not made for C++ is it.
+
+## Rust
+
+Rust exposes really cool `GlobalAlloc` API that can be overridden. After doing so, there is no need to even use the library yourself - Rust does everything for you.
+
+
