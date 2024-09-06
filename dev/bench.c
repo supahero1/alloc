@@ -30,6 +30,17 @@ fast_rand(
 }
 
 
+uint64_t
+dev_get_time(
+	void
+	)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t) ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+
 struct
 {
 	pthread_mutex_t Mutex;
@@ -100,6 +111,7 @@ main(
 	}
 
 	puts("start");
+	uint64_t Start = dev_get_time();
 
 	pthread_t Threads[THREADS];
 
@@ -113,12 +125,15 @@ main(
 		pthread_join(Threads[i], NULL);
 	}
 
+	uint64_t End = dev_get_time();
 	puts("end");
 
 	for(int i = 0; i < POINTERS; i++)
 	{
 		pthread_mutex_destroy(&Ptrs[i].Mutex);
 	}
+
+	fprintf(stderr, "Time: %.02lfms\n", (double)(End - Start) / 1000000.0);
 
 	return 0;
 }

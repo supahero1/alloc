@@ -27,20 +27,20 @@ bench:
 	touch ../bin/log.txt
 	echo "\nResults:" >> ../bin/log.txt
 
-	echo "\n> pt2malloc:\n" >> ../bin/log.txt
-	time -p ../bin/bench_other 2>> ../bin/log.txt
+	echo "\n> pt2malloc:" >> ../bin/log.txt
+	../bin/bench_other 2>> ../bin/log.txt
 
-	echo "\n> jemalloc:\n" >> ../bin/log.txt
+	echo "\n> jemalloc:" >> ../bin/log.txt
 	LD_PRELOAD=$(shell find /usr -name "libjemalloc.so") \
-	time -p ../bin/bench_other 2>> ../bin/log.txt
+	../bin/bench_other 2>> ../bin/log.txt
 
-	echo "\n> mimalloc:\n" >> ../bin/log.txt
+	echo "\n> mimalloc:" >> ../bin/log.txt
 	LD_PRELOAD=$(shell find /usr -name "libmimalloc.so") \
-	time -p ../bin/bench_other 2>> ../bin/log.txt
+	../bin/bench_other 2>> ../bin/log.txt
 
-	echo "\n> alloc:\n" >> ../bin/log.txt
+	echo "\n> alloc:" >> ../bin/log.txt
 	LD_LIBRARY_PATH=../bin:$$LD_LIBRARY_PATH \
 	DYLD_LIBRARY_PATH=../bin:$$DYLD_LIBRARY_PATH \
-	time -p ../bin/bench_alloc 2>> ../bin/log.txt
+	../bin/bench_alloc 2>> ../bin/log.txt
 
 	cat ../bin/log.txt
