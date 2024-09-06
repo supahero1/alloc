@@ -11,8 +11,8 @@ test:
 	LD_PRELOAD=$(shell find /usr -name "libmimalloc.so") \
 	../bin/test_other
 
-	LD_LIBRARY_PATH=../bin:$LD_LIBRARY_PATH \
-	DYLD_LIBRARY_PATH=../bin:$DYLD_LIBRARY_PATH \
+	LD_LIBRARY_PATH=../bin:$$LD_LIBRARY_PATH \
+	DYLD_LIBRARY_PATH=../bin:$$DYLD_LIBRARY_PATH \
 	../bin/test_alloc
 
 
@@ -39,8 +39,8 @@ bench:
 	time -p ../bin/bench_other 2>> ../bin/log.txt
 
 	echo "\n> alloc:\n" >> ../bin/log.txt
-	LD_LIBRARY_PATH=../bin:$LD_LIBRARY_PATH \
-	DYLD_LIBRARY_PATH=../bin:$DYLD_LIBRARY_PATH \
+	LD_LIBRARY_PATH=../bin:$$LD_LIBRARY_PATH \
+	DYLD_LIBRARY_PATH=../bin:$$DYLD_LIBRARY_PATH \
 	time -p ../bin/bench_alloc 2>> ../bin/log.txt
 
 	cat ../bin/log.txt
