@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -Werror
+CFLAGS = -Wall -Wextra
 
 ifeq ($(RELEASE), 1)
 CFLAGS += -O3 -DNDEBUG
@@ -21,10 +21,12 @@ all:
 	LD_LIBRARY_PATH=../bin:$LD_LIBRARY_PATH ../bin/test_alloc
 
 
+BFLAGS := $(CFLAGS) -pthread
+
 .PHONY: bench
 bench:
-	gcc bench.c -o ../bin/bench_other $(CFLAGS)
-	gcc bench.c -DDEV_ALLOC -o ../bin/bench_alloc $(CFLAGS) -L../bin -lalloc
+	gcc bench.c -o ../bin/bench_other $(BFLAGS)
+	gcc bench.c -DDEV_ALLOC -o ../bin/bench_alloc $(BFLAGS) -L../bin -lalloc
 
 	$(RM) ../bin/log.txt
 	touch ../bin/log.txt

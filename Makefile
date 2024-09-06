@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -Werror -Wno-address-of-packed-member
+CFLAGS = -Wall -Wextra -Wno-address-of-packed-member
 
 ifeq ($(RELEASE), 1)
 CFLAGS += -O3 -DNDEBUG
@@ -6,8 +6,15 @@ else
 CFLAGS += -O0 -g3 -ggdb
 endif
 
+ifeq ($(OS), Windows_NT)
+OUTPUT := bin/liballoc.dll
+CFLAGS += -Wl,--out-implib,bin/liballoc.lib
+else
+OUTPUT := bin/liballoc.so
+endif
+
 .PHONY: all
-all: bin/liballoc.so
+all: $(OUTPUT)
 	$(MAKE) -C dev
 
 bin:
@@ -17,5 +24,5 @@ bin:
 clean:
 	$(RM) -r bin
 
-bin/liballoc.so: src/alloc.c src/debug.c | bin
+$(OUTPUT): src/alloc.c src/debug.c | bin
 	gcc -shared -fPIC $(CFLAGS) -o $@ $^

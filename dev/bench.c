@@ -2,24 +2,44 @@
 
 #include <time.h>
 #include <stdio.h>
-#include <unistd.h>
-#include <threads.h>
+#include <pthread.h>
 
 #define OPERATIONS 0x10000
 #define THREADS 0x10
-#define POINTERS 0x80
+#define POINTERS 0x1000
+
+
+static uint32_t r_seed;
+
+static void
+fast_srand(
+	const uint32_t seed
+	)
+{
+	r_seed = seed;
+}
+
+static uint32_t
+fast_rand(
+	void
+	)
+{
+	/* Yes this is multithreaded, yes corruption will occur, no I do not care */
+	r_seed = (1103515245 * r_seed + 12345) & 0x7FFFFFFF;
+	return r_seed;
+}
 
 
 struct
 {
-	mtx_t Mutex;
+	pthread_mutex_t Mutex;
 	void* Ptr;
 	size_t Size;
 }
 Ptrs[POINTERS];
 
 
-int
+void*
 dev_bench(
 	void* Arg
 	)
@@ -28,20 +48,21 @@ dev_bench(
 
 	for(int i = 0; i < OPERATIONS; i++)
 	{
-		int r = rand();
+		int r = fast_rand();
 		int Index = r % POINTERS;
 		r >>= 12;
 		int Size = 1 + (r & 0xFFFF);
 		r >>= 16;
 		int Bool = r & 1;
 
-		mtx_lock(&Ptrs[Index].Mutex);
+		pthread_mutex_lock(&Ptrs[Index].Mutex);
 
 		if(Ptrs[Index].Ptr)
 		{
 			if(Bool)
 			{
 				Ptrs[Index].Ptr = dev_realloc(Ptrs[Index].Ptr, Ptrs[Index].Size, Size, 0);
+				*(uint8_t*) Ptrs[Index].Ptr = 0;
 				Ptrs[Index].Size = Size;
 			}
 			else
@@ -54,12 +75,13 @@ dev_bench(
 		{
 			Ptrs[Index].Size = Size;
 			Ptrs[Index].Ptr = dev_alloc(Ptrs[Index].Size, 0);
+			*(uint8_t*) Ptrs[Index].Ptr = 0;
 		}
 
-		mtx_unlock(&Ptrs[Index].Mutex);
+		pthread_mutex_unlock(&Ptrs[Index].Mutex);
 	}
 
-	return 0;
+	return NULL;
 }
 
 
@@ -68,34 +90,34 @@ main(
 	void
 	)
 {
-	srand(time(NULL));
+	fast_srand(time(NULL));
 
 	for(int i = 0; i < POINTERS; i++)
 	{
-		mtx_init(&Ptrs[i].Mutex, mtx_plain);
+		pthread_mutex_init(&Ptrs[i].Mutex, NULL);
 		Ptrs[i].Ptr = NULL;
 		Ptrs[i].Size = 0;
 	}
 
 	puts("start");
 
-	thrd_t Threads[THREADS];
+	pthread_t Threads[THREADS];
 
 	for(int i = 0; i < THREADS; i++)
 	{
-		thrd_create(&Threads[i], dev_bench, NULL);
+		pthread_create(&Threads[i], NULL, dev_bench, NULL);
 	}
 
 	for(int i = 0; i < THREADS; i++)
 	{
-		thrd_join(Threads[i], NULL);
+		pthread_join(Threads[i], NULL);
 	}
 
 	puts("end");
 
 	for(int i = 0; i < POINTERS; i++)
 	{
-		mtx_destroy(&Ptrs[i].Mutex);
+		pthread_mutex_destroy(&Ptrs[i].Mutex);
 	}
 
 	return 0;
