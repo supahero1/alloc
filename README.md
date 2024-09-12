@@ -2,9 +2,9 @@ This is a custom memory allocator I wrote in C. Its features are:
 
 1. Lack of loops, where every memory-related code path is `O(1)`.
 
-2. Lack per-allocation metadata, increasing cache friendliness and decreasing memory footprint.
+2. Lack of per-allocation metadata, increasing cache friendliness and decreasing memory footprint.
 
-3. All allocations are always aligned to the next or equal power of 2 of the size that is requested. [^2]
+3. All allocations are by default aligned to the next or equal power of 2 of the size that is requested. [^2]
 
 4. Thread-safe by default, with an option to disable it at compilation.
 
