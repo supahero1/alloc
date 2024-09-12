@@ -4,7 +4,7 @@ This is a custom memory allocator I wrote in C. Its features are:
 
 2. Lack per-allocation metadata, increasing cache friendliness and decreasing memory footprint.
 
-3. All allocations are always aligned at no additional cost to the next or equal power of 2 of the size that is requested.
+3. All allocations are always aligned to the next or equal power of 2 of the size that is requested. [^2]
 
 4. Thread-safe by default, with an option to disable it at compilation.
 
@@ -17,6 +17,8 @@ This is a custom memory allocator I wrote in C. Its features are:
 8. Customizable at compile-time (the defaults) as well as at runtime.
 
 [^1]: 33-50% faster on Linux/MacOS, ~75% faster on Windows, but speed may vary between different environments and workloads. The kernel time difference used to be clearly visible back when `time` was used to measure the benchmark, but there have been issues with the command not working on some platforms in specific settings, so it was replaced with in-code time measuring that only takes real time into account.
+
+[^2]: Zero cost for small allocations, then grows slightly as the allocation size grows, caps out at below a page size for large allocations, which comparatively is rather little.
 
 It supports Linux, MacOS, Windows (mingw/msys), 64bit and 32bit.
 
