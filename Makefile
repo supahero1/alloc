@@ -3,10 +3,7 @@
 CFLAGS := -Wall -Wextra -Wno-address-of-packed-member
 
 ifeq ($(M32), 1)
-CC := gcc-11
 CFLAGS += -m32
-else
-CC := gcc
 endif
 
 ifeq ($(RELEASE), 1)
