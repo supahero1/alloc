@@ -190,7 +190,7 @@ typedef struct AllocHandleInfo
 	alloc_t AllocSize;
 
 	/* The handle will allocate memory in blocks of this size and then
-	 * suballocate objects from those blocks. It must be a power of 2.
+	 * sub-allocate objects from those blocks. It must be a power of 2.
 	 *
 	 * `BlockSize` for `AllocSize = 1` has an upper bound of `65536`. For
 	 * `AllocSize = 2`, that number is `131072`. Anything larger has the limit
