@@ -538,115 +538,115 @@ Static AllocHandleInfo AllocDefaultHandleInfo[] =
 	 */
 /*   0*/{ .AllocSize = 1, .BlockSize =
 			sizeof(Alloc1Block) + sizeof(Alloc1), .Alignment = 1 },
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(3)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(2)
 /*   1*/{ .AllocSize = ALLOC_PO2(1), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(1) },
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(4)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(3)
 /*   2*/{ .AllocSize = ALLOC_PO2(2), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(2)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(5)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(4)
 /*   3*/{ .AllocSize = ALLOC_PO2(3), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(3)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(6)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(5)
 /*   4*/{ .AllocSize = ALLOC_PO2(4), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(4)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(7)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(6)
 /*   5*/{ .AllocSize = ALLOC_PO2(5), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(5)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(8)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(7)
 /*   6*/{ .AllocSize = ALLOC_PO2(6), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(6)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(9)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(8)
 /*   7*/{ .AllocSize = ALLOC_PO2(7), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(7)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(10)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(9)
 /*   8*/{ .AllocSize = ALLOC_PO2(8), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(8)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(11)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(10)
 /*   9*/{ .AllocSize = ALLOC_PO2(9), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(9)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(12)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(11)
 /*  10*/{ .AllocSize = ALLOC_PO2(10), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(10)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(13)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(12)
 /*  11*/{ .AllocSize = ALLOC_PO2(11), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(11)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(14)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(13)
 /*  12*/{ .AllocSize = ALLOC_PO2(12), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(12)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(15)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(14)
 /*  13*/{ .AllocSize = ALLOC_PO2(13), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(13)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(16)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(15)
 /*  14*/{ .AllocSize = ALLOC_PO2(14), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(14)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(17)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(16)
 /*  15*/{ .AllocSize = ALLOC_PO2(15), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(15)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(18)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(17)
 /*  16*/{ .AllocSize = ALLOC_PO2(16), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(16)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(19)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(18)
 /*  17*/{ .AllocSize = ALLOC_PO2(17), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(17)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(20)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(19)
 /*  18*/{ .AllocSize = ALLOC_PO2(18), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(18)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(21)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(20)
 /*  19*/{ .AllocSize = ALLOC_PO2(19), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(19)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(22)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(21)
 /*  20*/{ .AllocSize = ALLOC_PO2(20), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(20)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(23)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(22)
 /*  21*/{ .AllocSize = ALLOC_PO2(21), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(21)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(24)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(23)
 /*  22*/{ .AllocSize = ALLOC_PO2(22), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(22)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(25)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(24)
 /*  23*/{ .AllocSize = ALLOC_PO2(23), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(23)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(26)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(25)
 /*  24*/{ .AllocSize = ALLOC_PO2(24), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(24)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(27)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(26)
 /*  25*/{ .AllocSize = ALLOC_PO2(25), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(25)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(28)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(27)
 /*  26*/{ .AllocSize = ALLOC_PO2(26), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(26)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(29)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(28)
 /*  27*/{ .AllocSize = ALLOC_PO2(27), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(27)},
 #endif
-#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(30)
+#if ALLOC_DEFAULT_BLOCK_SIZE >= ALLOC_PO2(29)
 /*  28*/{ .AllocSize = ALLOC_PO2(28), .BlockSize =
 			ALLOC_DEFAULT_BLOCK_SIZE, .Alignment = ALLOC_PO2(28)},
 #endif
@@ -1528,7 +1528,11 @@ AllocGetHandleS(
 	alloc_t Size
 	)
 {
-	AssertNEQ(Size, 0);
+	if(Size == 0)
+	{
+		/* No functions use a handle when size is 0 */
+		return NULL;
+	}
 
 	uint32_t Index = State->IndexFunc(Size);
 	Index = ALLOC_MIN(Index, State->HandleCount - 1);
