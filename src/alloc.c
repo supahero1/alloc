@@ -1716,6 +1716,11 @@ AllocFreeH(
 	alloc_t Size
 	)
 {
+	if(!Size)
+	{
+		return;
+	}
+
 	AllocHandleLockH(Handle);
 		AllocFreeUH(Handle, Ptr, Size);
 	AllocHandleUnlockH(Handle);
@@ -1729,6 +1734,11 @@ AllocFreeUH(
 	alloc_t Size
 	)
 {
+	if(!Size)
+	{
+		return;
+	}
+
 	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	HandleInternal->FreeFunc(HandleInternal,
