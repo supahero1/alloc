@@ -1686,6 +1686,11 @@ AllocAllocH(
 	int Zero
 	)
 {
+	if(!Size)
+	{
+		return NULL;
+	}
+
 	void* Ptr;
 
 	AllocHandleLockH(Handle);
@@ -1703,6 +1708,11 @@ AllocAllocUH(
 	int Zero
 	)
 {
+	if(!Size)
+	{
+		return NULL;
+	}
+
 	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	return HandleInternal->AllocFunc(HandleInternal, Size, Zero);
