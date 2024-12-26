@@ -21,6 +21,14 @@ extern "C" {
 #include "../include/alloc_std.h"
 #include "../include/debug.h"
 
+#if !defined(NDEBUG) && (VALGRIND || __has_include(<valgrind/valgrind.h>))
+	#define ALLOC_VALGRIND
+
+	#include <stdlib.h>
+
+	#include <valgrind/valgrind.h>
+#endif
+
 #include <assert.h>
 #include <string.h>
 
@@ -721,7 +729,7 @@ AllocLibraryInit(
 
 #ifndef ALLOC_DO_NOT_AUTO_INIT_GLOBAL_STATE
 	AllocGlobalState = AllocAllocState(NULL);
-	AssertNEQ(AllocGlobalState, NULL);
+	AssertNotNull(AllocGlobalState);
 #endif
 }
 
@@ -925,7 +933,7 @@ AllocFree1Func(
 					Handle->Head->Prev = Block;
 				}
 
-				AssertEQ(Block->Prev, NULL);
+				AssertNull(Block->Prev);
 				Block->Next = (void*) Handle->Head;
 				Handle->Head = (void*) Block;
 			}
@@ -1055,7 +1063,7 @@ AllocFree2Func(
 				Handle->Head->Prev = Alloc;
 			}
 
-			AssertEQ(Alloc->Prev, NULL);
+			AssertNull(Alloc->Prev);
 			Alloc->Next = (void*) Handle->Head;
 			Handle->Head = (void*) Alloc;
 		}
@@ -1186,7 +1194,7 @@ AllocFree4Func(
 				Handle->Head->Prev = Alloc;
 			}
 
-			AssertEQ(Alloc->Prev, NULL);
+			AssertNull(Alloc->Prev);
 			Alloc->Next = (void*) Handle->Head;
 			Handle->Head = (void*) Alloc;
 		}
@@ -1713,6 +1721,18 @@ AllocAllocUH(
 		return NULL;
 	}
 
+#ifdef ALLOC_VALGRIND
+	if(RUNNING_ON_VALGRIND)
+	{
+		if(Zero)
+		{
+			return calloc(1, Size);
+		}
+
+		return malloc(Size);
+	}
+#endif
+
 	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	return HandleInternal->AllocFunc(HandleInternal, Size, Zero);
@@ -1749,11 +1769,92 @@ AllocFreeUH(
 		return;
 	}
 
+#ifdef ALLOC_VALGRIND
+	if(RUNNING_ON_VALGRIND)
+	{
+		free((void*) Ptr);
+		return;
+	}
+#endif
+
 	AllocHandleInternal* HandleInternal = (void*) Handle;
 
 	HandleInternal->FreeFunc(HandleInternal,
 		GetBasePtr(HandleInternal, Ptr), (void*) Ptr, Size);
 }
+
+
+#ifdef ALLOC_VALGRIND
+	#define ALLOC_REALLOC_CHECK_VALGRIND()					\
+	do														\
+	{														\
+		if(RUNNING_ON_VALGRIND)								\
+		{													\
+			void* NewPtr = realloc((void*) Ptr, NewSize);	\
+			if(!NewPtr)										\
+			{												\
+				return NULL;								\
+			}												\
+															\
+			if(NewSize > OldSize && Zero)					\
+			{												\
+				(void) memset((uint8_t*) NewPtr				\
+					+ OldSize, 0, NewSize - OldSize);		\
+			}												\
+															\
+			return NewPtr;									\
+		}													\
+	}														\
+	while(0)
+#else
+	#define ALLOC_REALLOC_CHECK_VALGRIND()
+#endif
+
+#define ALLOC_REALLOC(AllocFunc, FreeFunc)						\
+do																\
+{																\
+	if(!NewSize)												\
+	{															\
+		FreeFunc (OldHandle, Ptr, OldSize);						\
+		return NULL;											\
+	}															\
+																\
+	if(!Ptr)													\
+	{															\
+		return AllocFunc (NewHandle, NewSize, Zero);			\
+	}															\
+																\
+	ALLOC_REALLOC_CHECK_VALGRIND();								\
+																\
+	if(OldHandle == NewHandle)									\
+	{															\
+		if(AllocHandleIsVirtual((void*) OldHandle))				\
+		{														\
+			return AllocReallocVirtual(Ptr, OldSize, NewSize);	\
+		}														\
+																\
+		if(NewSize > OldSize && Zero)							\
+		{														\
+			(void) memset((uint8_t*) Ptr						\
+				+ OldSize, 0, NewSize - OldSize);				\
+		}														\
+																\
+		return (void*) Ptr;										\
+	}															\
+																\
+	void* NewPtr = AllocFunc (NewHandle, NewSize, Zero);		\
+	if(!NewPtr)													\
+	{															\
+		return NULL;											\
+	}															\
+																\
+	(void) memcpy(NewPtr, Ptr, ALLOC_MIN(OldSize, NewSize));	\
+																\
+	FreeFunc (OldHandle, Ptr, OldSize);							\
+																\
+	return NewPtr;												\
+}																\
+while(0)
 
 
 void*
@@ -1766,43 +1867,7 @@ AllocReallocH(
 	int Zero
 	)
 {
-	if(!NewSize)
-	{
-		AllocFreeH(OldHandle, Ptr, OldSize);
-		return NULL;
-	}
-
-	if(!Ptr)
-	{
-		return AllocAllocH(NewHandle, NewSize, Zero);
-	}
-
-	if(OldHandle == NewHandle)
-	{
-		if(AllocHandleIsVirtual((void*) OldHandle))
-		{
-			return AllocReallocVirtual(Ptr, OldSize, NewSize);
-		}
-
-		if(NewSize > OldSize && Zero)
-		{
-			(void) memset((uint8_t*) Ptr + OldSize, 0, NewSize - OldSize);
-		}
-
-		return (void*) Ptr;
-	}
-
-	void* NewPtr = AllocAllocH(NewHandle, NewSize, Zero);
-	if(!NewPtr)
-	{
-		return NULL;
-	}
-
-	(void) memcpy(NewPtr, Ptr, ALLOC_MIN(OldSize, NewSize));
-
-	AllocFreeH(OldHandle, Ptr, OldSize);
-
-	return NewPtr;
+	ALLOC_REALLOC(AllocAllocH, AllocFreeH);
 }
 
 
@@ -1816,43 +1881,7 @@ AllocReallocUH(
 	int Zero
 	)
 {
-	if(!NewSize)
-	{
-		AllocFreeUH(OldHandle, Ptr, OldSize);
-		return NULL;
-	}
-
-	if(!Ptr)
-	{
-		return AllocAllocUH(NewHandle, NewSize, Zero);
-	}
-
-	if(OldHandle == NewHandle)
-	{
-		if(AllocHandleIsVirtual((void*) OldHandle))
-		{
-			return AllocReallocVirtual(Ptr, OldSize, NewSize);
-		}
-
-		if(NewSize > OldSize && Zero)
-		{
-			(void) memset((uint8_t*) Ptr + OldSize, 0, NewSize - OldSize);
-		}
-
-		return (void*) Ptr;
-	}
-
-	void* NewPtr = AllocAllocUH(NewHandle, NewSize, Zero);
-	if(!NewPtr)
-	{
-		return NULL;
-	}
-
-	(void) memcpy(NewPtr, Ptr, ALLOC_MIN(OldSize, NewSize));
-
-	AllocFreeUH(OldHandle, Ptr, OldSize);
-
-	return NewPtr;
+	ALLOC_REALLOC(AllocAllocUH, AllocFreeUH);
 }
 
 

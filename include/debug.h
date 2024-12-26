@@ -82,6 +82,10 @@ AssertFailed(										\
 
 #define HardenedAssertEQ(A, B) if(!__builtin_expect(A == B, 1)) AssertFail(A, B, "==", "!=")
 #define HardenedAssertNEQ(A, B) if(!__builtin_expect(A != B, 1)) AssertFail(A, B, "!=", "==")
+#define HardenedAssertTrue(A) HardenedAssertEQ(A, true)
+#define HardenedAssertFalse(A) HardenedAssertEQ(A, false)
+#define HardenedAssertNull(A) HardenedAssertEQ(A, NULL)
+#define HardenedAssertNotNull(A) HardenedAssertNEQ(A, NULL)
 #define HardenedAssertLT(A, B) if(!__builtin_expect(A < B, 1)) AssertFail(A, B, "<", ">=")
 #define HardenedAssertLE(A, B) if(!__builtin_expect(A <= B, 1)) AssertFail(A, B, "<=", ">")
 #define HardenedAssertGT(A, B) if(!__builtin_expect(A > B, 1)) AssertFail(A, B, ">", "<=")
@@ -92,6 +96,10 @@ UnreachableAssertFailed("Unreachable assertion failed, at " __FILE__ ":" Stringi
 
 #define EmptyAssertEQ(A, B) if(!__builtin_expect(A == B, 1)) __builtin_unreachable()
 #define EmptyAssertNEQ(A, B) if(!__builtin_expect(A != B, 1)) __builtin_unreachable()
+#define EmptyAssertTrue(A) EmptyAssertEQ(A, true)
+#define EmptyAssertFalse(A) EmptyAssertEQ(A, false)
+#define EmptyAssertNull(A) EmptyAssertEQ(A, NULL)
+#define EmptyAssertNotNull(A) EmptyAssertNEQ(A, NULL)
 #define EmptyAssertLT(A, B) if(!__builtin_expect(A < B, 1)) __builtin_unreachable()
 #define EmptyAssertLE(A, B) if(!__builtin_expect(A <= B, 1)) __builtin_unreachable()
 #define EmptyAssertGT(A, B) if(!__builtin_expect(A > B, 1)) __builtin_unreachable()
@@ -102,6 +110,10 @@ UnreachableAssertFailed("Unreachable assertion failed, at " __FILE__ ":" Stringi
 #ifndef NDEBUG
 	#define AssertEQ(A, B) HardenedAssertEQ(A, B)
 	#define AssertNEQ(A, B) HardenedAssertNEQ(A, B)
+	#define AssertTrue(A) HardenedAssertTrue(A)
+	#define AssertFalse(A) HardenedAssertFalse(A)
+	#define AssertNull(A) HardenedAssertNull(A)
+	#define AssertNotNull(A) HardenedAssertNotNull(A)
 	#define AssertLT(A, B) HardenedAssertLT(A, B)
 	#define AssertLE(A, B) HardenedAssertLE(A, B)
 	#define AssertGT(A, B) HardenedAssertGT(A, B)
@@ -112,6 +124,10 @@ UnreachableAssertFailed("Unreachable assertion failed, at " __FILE__ ":" Stringi
 #else
 	#define AssertEQ(A, B) EmptyAssertEQ(A, B)
 	#define AssertNEQ(A, B) EmptyAssertNEQ(A, B)
+	#define AssertTrue(A) EmptyAssertTrue(A)
+	#define AssertFalse(A) EmptyAssertFalse(A)
+	#define AssertNull(A) EmptyAssertNull(A)
+	#define AssertNotNull(A) EmptyAssertNotNull(A)
 	#define AssertLT(A, B) EmptyAssertLT(A, B)
 	#define AssertLE(A, B) EmptyAssertLE(A, B)
 	#define AssertGT(A, B) EmptyAssertGT(A, B)

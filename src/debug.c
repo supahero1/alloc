@@ -24,7 +24,9 @@ extern "C" {
 #include <stdarg.h>
 #include <stdlib.h>
 
-#ifdef __linux__
+#if __has_include(<execinfo.h>)
+	#define DEBUG_STACK_TRACE
+
 	#include <execinfo.h>
 #endif
 
@@ -34,7 +36,7 @@ PrintStackTrace(
 	void
 	)
 {
-#ifdef __linux__
+#ifdef DEBUG_STACK_TRACE
 	void* Buffer[256];
 	int Count = backtrace(Buffer, 256);
 	char** Symbols = backtrace_symbols(Buffer, Count);

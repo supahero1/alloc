@@ -36,4 +36,4 @@ By design (no heap usage), WebAssembly is not and never will be supported.
 
 ## Contributions
 
-... are welcome. This is a very fresh, immature projects. It could use more updates.
+... are welcome. This is a very fresh, immature project. It could use more updates.
