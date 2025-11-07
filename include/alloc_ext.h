@@ -323,7 +323,7 @@ alloc_handle_get_flags_u(
 	alloc_t _new_size = sizeof(*_ptr) * (new_size);								\
 	int _zero = (zero);															\
 																				\
-	allow_realloc_h(															\
+	alloc_realloc_h(															\
 		alloc_get_handle_s(_old_state, _old_size),								\
 		_ptr,																	\
 		_old_size,																\
@@ -361,7 +361,7 @@ alloc_handle_get_flags_u(
 	alloc_t _new_size = sizeof(*_ptr) * (new_size);		\
 	int _zero = (zero);									\
 														\
-	allow_realloc_h(									\
+	alloc_realloc_h(									\
 		alloc_get_handle(_old_size),					\
 		_ptr,											\
 		_old_size,										\

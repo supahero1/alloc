@@ -1751,7 +1751,7 @@ while(0)
 
 
 void*
-allow_realloc_h(
+alloc_realloc_h(
 	_opaque_ alloc_handle_t* old_handle,
 	_opaque_ void* ptr,
 	alloc_t old_size,
