@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-Wall, -xc, -std=c2y, -D_GNU_SOURCE]

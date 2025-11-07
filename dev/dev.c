@@ -4,46 +4,46 @@
 #include <string.h>
 
 #ifdef DEV_ALLOC
-	#include "../include/alloc_std.h"
+	#include "../include/alloc.h"
 
 
 	void*
 	dev_alloc(
-		size_t Size,
-		int Zero
+		size_t size,
+		int zero
 		)
 	{
-		return AllocAllocH(
-			AllocGetHandleS(AllocGetGlobalState(), Size),
-			Size, Zero);
+		return alloc_alloc_h(
+			alloc_get_handle_s(alloc_get_global_state(), size),
+			size, zero);
 	}
 
 
 	void
 	dev_free(
-		const void* Ptr,
-		size_t Size
+		const void* ptr,
+		size_t size
 		)
 	{
-		AllocFreeH(
-			AllocGetHandleS(AllocGetGlobalState(), Size),
-			Ptr, Size);
+		alloc_free_h(
+			alloc_get_handle_s(alloc_get_global_state(), size),
+			ptr, size);
 	}
 
 
 	void*
 	dev_realloc(
-		const void* Ptr,
-		size_t OldSize,
-		size_t NewSize,
-		int Zero
+		const void* ptr,
+		size_t old_size,
+		size_t new_size,
+		int zero
 		)
 	{
-		return AllocReallocH(
-			AllocGetHandleS(AllocGetGlobalState(), OldSize),
-			Ptr, OldSize,
-			AllocGetHandleS(AllocGetGlobalState(), NewSize),
-			NewSize, Zero);
+		return allow_realloc_h(
+			alloc_get_handle_s(alloc_get_global_state(), old_size),
+			ptr, old_size,
+			alloc_get_handle_s(alloc_get_global_state(), new_size),
+			new_size, zero);
 	}
 
 
@@ -53,53 +53,52 @@
 
 	void*
 	dev_alloc(
-		size_t Size,
-		int Zero
+		size_t size,
+		int zero
 		)
 	{
-		if(!Zero)
+		if(!zero)
 		{
-			return malloc(Size);
+			return malloc(size);
 		}
 
-		return calloc(1, Size);
+		return calloc(1, size);
 	}
 
 
 	void
 	dev_free(
-		const void* Ptr,
-		size_t Size
+		const void* ptr,
+		size_t size
 		)
 	{
-		(void) Size;
+		(void) size;
 
-		free((void*) Ptr);
+		free((void*) ptr);
 	}
 
 
 	void*
 	dev_realloc(
-		const void* Ptr,
-		size_t OldSize,
-		size_t NewSize,
-		int Zero
+		const void* ptr,
+		size_t old_size,
+		size_t new_size,
+		int zero
 		)
 	{
-		void* NewPtr = realloc((void*) Ptr, NewSize);
-		if(!NewPtr)
+		void* new_ptr = realloc((void*) ptr, new_size);
+		if(!new_ptr)
 		{
 			return NULL;
 		}
 
-		if(NewSize > OldSize && Zero)
+		if(new_size > old_size && zero)
 		{
-			(void) memset((uint8_t*) NewPtr + OldSize, 0, NewSize - OldSize);
+			(void) memset((uint8_t*) new_ptr + old_size, 0, new_size - old_size);
 		}
 
-		return NewPtr;
+		return new_ptr;
 	}
 
 
 #endif
-

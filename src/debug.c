@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024 Franciszek Balcerak
+ *   Copyright 2024-2025 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,10 +14,6 @@
  *  limitations under the License.
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "../include/debug.h"
 
 #include <stdio.h>
@@ -31,24 +27,24 @@ extern "C" {
 #endif
 
 
-Static void
-PrintStackTrace(
+private void
+print_stack_trace(
 	void
 	)
 {
 #ifdef DEBUG_STACK_TRACE
-	void* Buffer[256];
-	int Count = backtrace(Buffer, 256);
-	char** Symbols = backtrace_symbols(Buffer, Count);
+	void* buffer[256];
+	int count = backtrace(buffer, 256);
+	char** symbols = backtrace_symbols(buffer, count);
 
-	fprintf(stderr, "Stack trace (%d):\n", Count);
+	fprintf(stderr, "Stack trace (%d):\n", count);
 
-	for(int i = 0; i < Count; ++i)
+	for(int i = 0; i < count; ++i)
 	{
-		fprintf(stderr, "#%d:\t%s\n", i + 1, Symbols[i]);
+		fprintf(stderr, "#%d:\t%s\n", i + 1, symbols[i]);
 	}
 
-	free(Symbols);
+	free(symbols);
 #else
 	fprintf(stderr, "Stack trace not supported on this platform\n");
 #endif
@@ -56,57 +52,52 @@ PrintStackTrace(
 
 
 void
-AssertFailed(
-	const char* Msg1,
-	const char* TypeA,
-	const char* Msg2,
-	const char* TypeB,
-	const char* Msg3,
+assert_failed(
+	const char* msg1,
+	const char* type1,
+	const char* msg2,
+	const char* type2,
+	const char* msg3,
 	...
 	)
 {
-	char Fmt[4096];
-	sprintf(Fmt, "%s%s%s%s%s", Msg1, TypeA, Msg2, TypeB, Msg3);
+	char format[4096];
+	sprintf(format, "%s%s%s%s%s", msg1, type1, msg2, type2, msg3);
 
-	va_list List;
-	va_start(List, Msg3);
-		vfprintf(stderr, Fmt, List);
-	va_end(List);
+	va_list list;
+	va_start(list, msg3);
+		vfprintf(stderr, format, list);
+	va_end(list);
 
-	PrintStackTrace();
+	print_stack_trace();
 
 	abort();
 }
 
 
 void
-UnreachableAssertFailed(
-	const char* Msg
+unreachable_assert_failed(
+	const char* msg
 	)
 {
-	fprintf(stderr, "%s", Msg);
+	fprintf(stderr, "%s", msg);
 
-	PrintStackTrace();
+	print_stack_trace();
 
 	abort();
 }
 
 
 void
-LocationLogger(
-	const char* Msg,
+location_logger(
+	const char* msg,
 	...
 	)
 {
-	va_list List;
-	va_start(List, Msg);
-		vfprintf(stderr, Msg, List);
-	va_end(List);
+	va_list list;
+	va_start(list, msg);
+		vfprintf(stderr, msg, list);
+	va_end(list);
 
-	PrintStackTrace();
+	print_stack_trace();
 }
-
-
-#ifdef __cplusplus
-}
-#endif

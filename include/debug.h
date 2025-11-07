@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024 Franciszek Balcerak
+ *   Copyright 2024-2025 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,124 +20,171 @@
 extern "C" {
 #endif
 
-#include <stdint.h>
-#include <inttypes.h>
+#include "macro.h"
 
 
 __attribute__((noreturn))
 extern void
-AssertFailed(
-	const char* Msg1,
-	const char* TypeA,
-	const char* Msg2,
-	const char* TypeB,
-	const char* Msg3,
+assert_failed(
+	const char* msg1,
+	const char* type1,
+	const char* msg2,
+	const char* type2,
+	const char* msg3,
 	...
 	);
 
 
 __attribute__((noreturn))
 extern void
-UnreachableAssertFailed(
-	const char* Msg
+unreachable_assert_failed(
+	const char* msg
 	);
 
 
 extern void
-LocationLogger(
-	const char* Msg,
+location_logger(
+	const char* msg,
 	...
 	);
 
 
-#define GetPrintfType(X)		\
-_Generic((X),					\
-	int8_t:			"%" PRId8,	\
-	int16_t:		"%" PRId16,	\
-	int32_t:		"%" PRId32,	\
-	int64_t:		"%" PRId64,	\
-	uint8_t:		"%" PRIu8,	\
-	uint16_t:		"%" PRIu16,	\
-	uint32_t:		"%" PRIu32,	\
-	uint64_t:		"%" PRIu64,	\
-	float:			"%f",		\
-	double:			"%lf",		\
-	long double:	"%Lf",		\
-	default:		"%p"		\
-)
+#define ASSERT_NULL ((const volatile void*) 0)
 
-#define Stringify2(X) #X
-#define Stringify(X) Stringify2(X)
+#define hard_assert_base(a, b, Op, ROp, ...)	\
+do												\
+{												\
+	typeof(b) _a = (a);							\
+	typeof(b) _b = (b);							\
+												\
+	if(!__builtin_expect(_a Op _b, 1))			\
+	{											\
+		__VA_ARGS__ __VA_OPT__(;)				\
+												\
+		assert_fail(_a, _b, #a, #b, #Op, #ROp);	\
+	}											\
+}												\
+while(0)
+#define hard_assert_eq(a, b, ...) hard_assert_base(a, b, ==, != __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_neq(a, b, ...) hard_assert_base(a, b, !=, == __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_true(a, ...) hard_assert_eq(a, true __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_false(a, ...) hard_assert_eq(a, false __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_null(a, ...) hard_assert_eq(a, ASSERT_NULL __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_not_null(a, ...) hard_assert_neq(a, ASSERT_NULL __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_ptr(ptr, size, ...)				\
+hard_assert_not_null(ptr,							\
+	{												\
+		bool is_zero = sizeof(*ptr) * size == 0;	\
+		if(__builtin_expect(is_zero, 1)) break;		\
+		__VA_ARGS__ __VA_OPT__(;)					\
+	}												\
+	)
+#define hard_assert_lt(a, b, ...) hard_assert_base(a, b, <, >= __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_le(a, b, ...) hard_assert_base(a, b, <=, > __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_gt(a, b, ...) hard_assert_base(a, b, >, <= __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_ge(a, b, ...) hard_assert_base(a, b, >=, < __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_unreachable(...)			\
+do												\
+{												\
+	__VA_ARGS__ __VA_OPT__(;)					\
+												\
+	unreachable_assert_failed(					\
+		"Unreachable assertion failed, at "		\
+		__FILE__ ":" MACRO_STR(__LINE__) "\n");	\
+}												\
+while(0)
+#define hard_assert_log(...)	\
+location_logger("at " __FILE__ ":" MACRO_STR(__LINE__) __VA_OPT__(":") "\n" __VA_ARGS__)
 
-#define AssertFail(A, B, Op, ROp)					\
-AssertFailed(										\
-	"Assertion \"" #A " " Op " " #B "\" failed: '",	\
-	GetPrintfType(A),								\
+#define empty_assert_base(a, b, Op, ...)	\
+do											\
+{											\
+	typeof(b) _a = (a);						\
+	typeof(b) _b = (b);						\
+											\
+	if(!__builtin_expect(_a Op _b, 1))		\
+	{										\
+		__VA_ARGS__ __VA_OPT__(;)			\
+											\
+		__builtin_unreachable();			\
+	}										\
+}											\
+while(0)
+#define empty_assert_eq(a, b, ...) empty_assert_base(a, b, ==)
+#define empty_assert_neq(a, b, ...) empty_assert_base(a, b, !=)
+#define empty_assert_true(a, ...) empty_assert_eq(a, true)
+#define empty_assert_false(a, ...) empty_assert_eq(a, false)
+#define empty_assert_null(a, ...) empty_assert_eq(a, ASSERT_NULL)
+#define empty_assert_not_null(a, ...) empty_assert_neq(a, ASSERT_NULL)
+#define empty_assert_ptr(ptr, size, ...)			\
+empty_assert_base(ptr, ASSERT_NULL, !=,				\
+	{												\
+		bool is_zero = sizeof(*ptr) * size == 0;	\
+		if(__builtin_expect(is_zero, 1)) break;		\
+	}												\
+	)
+#define empty_assert_lt(a, b, ...) empty_assert_base(a, b, <)
+#define empty_assert_le(a, b, ...) empty_assert_base(a, b, <=)
+#define empty_assert_gt(a, b, ...) empty_assert_base(a, b, >)
+#define empty_assert_ge(a, b, ...) empty_assert_base(a, b, >=)
+#define empty_assert_unreachable() __builtin_unreachable()
+#define empty_assert_log()
+
+#define assert_fail_base(a, b, Op, ROp, assert_str)	\
+assert_failed(										\
+	"Assertion \"" assert_str "\" failed: '",		\
+	MACRO_FORMAT_TYPE(a),							\
 	"' " ROp " '",									\
-	GetPrintfType(B),								\
-	"', at " __FILE__ ":" Stringify(__LINE__) "\n",	\
-	A,												\
-	B												\
-	)												\
-
-#define HardenedAssertEQ(A, B) if(!__builtin_expect(A == B, 1)) AssertFail(A, B, "==", "!=")
-#define HardenedAssertNEQ(A, B) if(!__builtin_expect(A != B, 1)) AssertFail(A, B, "!=", "==")
-#define HardenedAssertTrue(A) HardenedAssertEQ(A, true)
-#define HardenedAssertFalse(A) HardenedAssertEQ(A, false)
-#define HardenedAssertNull(A) HardenedAssertEQ(A, NULL)
-#define HardenedAssertNotNull(A) HardenedAssertNEQ(A, NULL)
-#define HardenedAssertLT(A, B) if(!__builtin_expect(A < B, 1)) AssertFail(A, B, "<", ">=")
-#define HardenedAssertLE(A, B) if(!__builtin_expect(A <= B, 1)) AssertFail(A, B, "<=", ">")
-#define HardenedAssertGT(A, B) if(!__builtin_expect(A > B, 1)) AssertFail(A, B, ">", "<=")
-#define HardenedAssertGE(A, B) if(!__builtin_expect(A >= B, 1)) AssertFail(A, B, ">=", "<")
-#define HardenedAssertUnreachable()	\
-UnreachableAssertFailed("Unreachable assertion failed, at " __FILE__ ":" Stringify(__LINE__) "\n")
-#define HardenedLogLocation(...) LocationLogger("At " __FILE__ ":" Stringify(__LINE__) __VA_OPT__(":") "\n" __VA_ARGS__)
-
-#define EmptyAssertEQ(A, B) if(!__builtin_expect(A == B, 1)) __builtin_unreachable()
-#define EmptyAssertNEQ(A, B) if(!__builtin_expect(A != B, 1)) __builtin_unreachable()
-#define EmptyAssertTrue(A) EmptyAssertEQ(A, true)
-#define EmptyAssertFalse(A) EmptyAssertEQ(A, false)
-#define EmptyAssertNull(A) EmptyAssertEQ(A, NULL)
-#define EmptyAssertNotNull(A) EmptyAssertNEQ(A, NULL)
-#define EmptyAssertLT(A, B) if(!__builtin_expect(A < B, 1)) __builtin_unreachable()
-#define EmptyAssertLE(A, B) if(!__builtin_expect(A <= B, 1)) __builtin_unreachable()
-#define EmptyAssertGT(A, B) if(!__builtin_expect(A > B, 1)) __builtin_unreachable()
-#define EmptyAssertGE(A, B) if(!__builtin_expect(A >= B, 1)) __builtin_unreachable()
-#define EmptyAssertUnreachable() __builtin_unreachable()
-#define EmptyLogLocation()
+	MACRO_FORMAT_TYPE(b),							\
+	"', at " __FILE__ ":" MACRO_STR(__LINE__) "\n",	\
+	a,												\
+	b												\
+	)
 
 #ifndef NDEBUG
-	#define AssertEQ(A, B) HardenedAssertEQ(A, B)
-	#define AssertNEQ(A, B) HardenedAssertNEQ(A, B)
-	#define AssertTrue(A) HardenedAssertTrue(A)
-	#define AssertFalse(A) HardenedAssertFalse(A)
-	#define AssertNull(A) HardenedAssertNull(A)
-	#define AssertNotNull(A) HardenedAssertNotNull(A)
-	#define AssertLT(A, B) HardenedAssertLT(A, B)
-	#define AssertLE(A, B) HardenedAssertLE(A, B)
-	#define AssertGT(A, B) HardenedAssertGT(A, B)
-	#define AssertGE(A, B) HardenedAssertGE(A, B)
-	#define AssertUnreachable() HardenedAssertUnreachable()
-	#define LogLocation(...) HardenedLogLocation(__VA_ARGS__)
-	#define Static
+	#define assert_fail(a, b, a_str, b_str, Op, ROp)	\
+	assert_fail_base(a, b, Op, ROp, a_str " " Op " " b_str)
+
+	#define assert_eq(...) hard_assert_eq(__VA_ARGS__)
+	#define assert_neq(...) hard_assert_neq(__VA_ARGS__)
+	#define assert_true(...) hard_assert_true(__VA_ARGS__)
+	#define assert_false(...) hard_assert_false(__VA_ARGS__)
+	#define assert_null(...) hard_assert_null(__VA_ARGS__)
+	#define assert_not_null(...) hard_assert_not_null(__VA_ARGS__)
+	#define assert_ptr(...) hard_assert_ptr(__VA_ARGS__)
+	#define assert_lt(...) hard_assert_lt(__VA_ARGS__)
+	#define assert_le(...) hard_assert_le(__VA_ARGS__)
+	#define assert_gt(...) hard_assert_gt(__VA_ARGS__)
+	#define assert_ge(...) hard_assert_ge(__VA_ARGS__)
+	#define assert_unreachable(...) hard_assert_unreachable(__VA_ARGS__)
+	#define assert_log(...) hard_assert_log(__VA_ARGS__)
+	#define private
 #else
-	#define AssertEQ(A, B) EmptyAssertEQ(A, B)
-	#define AssertNEQ(A, B) EmptyAssertNEQ(A, B)
-	#define AssertTrue(A) EmptyAssertTrue(A)
-	#define AssertFalse(A) EmptyAssertFalse(A)
-	#define AssertNull(A) EmptyAssertNull(A)
-	#define AssertNotNull(A) EmptyAssertNotNull(A)
-	#define AssertLT(A, B) EmptyAssertLT(A, B)
-	#define AssertLE(A, B) EmptyAssertLE(A, B)
-	#define AssertGT(A, B) EmptyAssertGT(A, B)
-	#define AssertGE(A, B) EmptyAssertGE(A, B)
-	#define AssertUnreachable() EmptyAssertUnreachable()
-	#define LogLocation(...) EmptyLogLocation()
-	#define Static static
+	#define assert_fail(a, b, a_str, b_str, Op, ROp)	\
+	assert_fail_base(a, b, Op, ROp, "(anonymous)")
+
+	#define assert_eq(...) empty_assert_eq(__VA_ARGS__)
+	#define assert_neq(...) empty_assert_neq(__VA_ARGS__)
+	#define assert_true(...) empty_assert_true(__VA_ARGS__)
+	#define assert_false(...) empty_assert_false(__VA_ARGS__)
+	#define assert_null(...) empty_assert_null(__VA_ARGS__)
+	#define assert_not_null(...) empty_assert_not_null(__VA_ARGS__)
+	#define assert_ptr(...) empty_assert_ptr(__VA_ARGS__)
+	#define assert_lt(...) empty_assert_lt(__VA_ARGS__)
+	#define assert_le(...) empty_assert_le(__VA_ARGS__)
+	#define assert_gt(...) empty_assert_gt(__VA_ARGS__)
+	#define assert_ge(...) empty_assert_ge(__VA_ARGS__)
+	#define assert_unreachable(...) empty_assert_unreachable()
+	#define assert_log(...) empty_assert_log()
+	#define private static
 #endif
 
-#define Fallthrough() __attribute__((fallthrough))
+#define assert_attr(...) __attribute__((__VA_ARGS__))
+#define assert_fallthrough() assert_attr(fallthrough)
+#define assert_ctor assert_attr(constructor)
+#define assert_dtor assert_attr(destructor)
+#define assert_used assert_attr(used)
+#define assert_packed assert_attr(packed)
 
 
 #ifdef __cplusplus

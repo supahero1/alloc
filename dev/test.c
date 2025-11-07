@@ -6,18 +6,18 @@
 
 void
 test(
-	size_t Size,
-	uint8_t* Shuffle
+	size_t size,
+	uint8_t* shuffle
 	)
 {
-	uint8_t* Ptrs[256];
+	uint8_t* ptrs[256];
 
 	for(size_t i = 0; i < 256; ++i)
 	{
-		Ptrs[i] = dev_alloc(Size, 1);
-		AssertNEQ(Ptrs[i], NULL);
+		ptrs[i] = dev_alloc(size, 1);
+		assert_neq(ptrs[i], NULL);
 
-		(void) memset(Ptrs[i], Shuffle[i], Size);
+		(void) memset(ptrs[i], shuffle[i], size);
 	}
 
 	for(size_t i = 0; i < 256; ++i)
@@ -25,55 +25,55 @@ test(
 		for(size_t j = 0; j < 256; ++j)
 		{
 			if(i == j) continue;
-			AssertNEQ(Ptrs[i], Ptrs[j]);
-			AssertEQ((
-				Ptrs[i] + Size <= Ptrs[j] || Ptrs[i] >= Ptrs[j] + Size
+			assert_neq(ptrs[i], ptrs[j]);
+			assert_eq((
+				ptrs[i] + size <= ptrs[j] || ptrs[i] >= ptrs[j] + size
 				), 1);
 		}
 
-		void* Tmp = dev_alloc(Size, 0);
-		AssertNEQ(Tmp, NULL);
+		void* tmp = dev_alloc(size, 0);
+		assert_neq(tmp, NULL);
 
-		(void) memset(Tmp, Shuffle[i], Size);
-		AssertEQ(memcmp(Ptrs[i], Tmp, Size), 0);
+		(void) memset(tmp, shuffle[i], size);
+		assert_eq(memcmp(ptrs[i], tmp, size), 0);
 
-		dev_free(Tmp, Size);
+		dev_free(tmp, size);
 	}
 
 	{
-		void* Ptr = dev_alloc(Size, 1);
-		AssertNEQ(Ptr, NULL);
+		void* ptr = dev_alloc(size, 1);
+		assert_neq(ptr, NULL);
 
-		void* Zero = dev_alloc(Size, 0);
-		AssertNEQ(Zero, NULL);
+		void* zero = dev_alloc(size, 0);
+		assert_neq(zero, NULL);
 
-		(void) memset(Zero, 0, Size);
-		AssertEQ(memcmp(Ptr, Zero, Size), 0);
+		(void) memset(zero, 0, size);
+		assert_eq(memcmp(ptr, zero, size), 0);
 
-		Ptrs[0] = dev_realloc(Ptrs[0], Size, Size << 1, 1);
-		AssertNEQ(Ptrs[0], NULL);
+		ptrs[0] = dev_realloc(ptrs[0], size, size << 1, 1);
+		assert_neq(ptrs[0], NULL);
 
-		void* Tmp = dev_alloc(Size, 0);
-		AssertNEQ(Tmp, NULL);
+		void* tmp = dev_alloc(size, 0);
+		assert_neq(tmp, NULL);
 
-		(void) memset(Tmp, Shuffle[0], Size);
+		(void) memset(tmp, shuffle[0], size);
 
-		AssertEQ(memcmp(Ptrs[0], Tmp, Size), 0);
-		AssertEQ(memcmp(Ptrs[0] + Size, Ptr, Size), 0);
+		assert_eq(memcmp(ptrs[0], tmp, size), 0);
+		assert_eq(memcmp(ptrs[0] + size, ptr, size), 0);
 
-		dev_free(Ptr, Size);
+		dev_free(ptr, size);
 
-		Ptrs[0] = dev_realloc(Ptrs[0], Size << 1, Size, 0);
-		AssertNEQ(Ptrs[0], NULL);
+		ptrs[0] = dev_realloc(ptrs[0], size << 1, size, 0);
+		assert_neq(ptrs[0], NULL);
 
-		AssertEQ(memcmp(Ptrs[0], Tmp, Size), 0);
+		assert_eq(memcmp(ptrs[0], tmp, size), 0);
 
-		dev_free(Tmp, Size);
+		dev_free(tmp, size);
 	}
 
 	for(size_t i = 0; i < 256; ++i)
 	{
-		dev_free(Ptrs[Shuffle[i]], Size);
+		dev_free(ptrs[shuffle[i]], size);
 	}
 }
 
@@ -89,26 +89,26 @@ main(
 {
 	srand(time(NULL));
 
-	uint8_t* Shuffle = dev_alloc(256, 0);
-	AssertNEQ(Shuffle, NULL);
+	uint8_t* shuffle = dev_alloc(256, 0);
+	assert_neq(shuffle, NULL);
 
 	for(size_t i = 0; i < 256; ++i)
 	{
-		Shuffle[i] = i;
+		shuffle[i] = i;
 	}
 
 	for(size_t i = 0; i < 256; ++i)
 	{
 		size_t j = rand() % 256;
 
-		uint8_t Temp = Shuffle[i];
-		Shuffle[i] = Shuffle[j];
-		Shuffle[j] = Temp;
+		uint8_t temp = shuffle[i];
+		shuffle[i] = shuffle[j];
+		shuffle[j] = temp;
 	}
 
 	for(size_t i = 1; i <= MAX; ++i)
 	{
-		test(i, Shuffle);
+		test(i, shuffle);
 	}
 
 	puts("pass");

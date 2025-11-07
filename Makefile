@@ -45,5 +45,5 @@ bin:
 clean:
 	$(RM) -r bin
 
-$(OUTPUT): src/alloc.c src/debug.c | bin
+$(OUTPUT): src/alloc.c src/debug.c src/sync.c | bin
 	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $^

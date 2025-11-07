@@ -34,6 +34,10 @@ See [this](https://crates.io/crates/shalloc) for more information.
 
 By design (no heap usage), WebAssembly is not and never will be supported.
 
+## Docs
+
+The first, older version of the code, had inline comments that you can still access [here](https://github.com/supahero1/alloc/blob/792cefe199ff2f6773e42519534fb7fe90ffe0bc/include/alloc_std.h). Not much has changed.
+
 ## Contributions
 
 ... are welcome. This is a very fresh, immature project. It could use more updates.
