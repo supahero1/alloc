@@ -28,10 +28,6 @@ extern "C" {
 	#include <valgrind/valgrind.h>
 #endif
 
-#ifndef NDEBUG
-	#define ALLOC_DEBUG
-#endif
-
 #ifdef ALLOC_DEBUG
 	#include <stdlib.h>
 #else
