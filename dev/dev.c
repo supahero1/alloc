@@ -4,8 +4,7 @@
 #include <string.h>
 
 #ifdef DEV_ALLOC
-	#include "../include/alloc.h"
-
+	#include "../include/alloc_ext.h"
 
 	void*
 	dev_alloc(
@@ -13,9 +12,7 @@
 		int zero
 		)
 	{
-		return alloc_alloc_h(
-			alloc_get_handle_s(alloc_get_global_state(), size),
-			size, zero);
+		return alloc_alloc(NULL, size, zero);
 	}
 
 
@@ -25,9 +22,7 @@
 		size_t size
 		)
 	{
-		alloc_free_h(
-			alloc_get_handle_s(alloc_get_global_state(), size),
-			ptr, size);
+		alloc_free(ptr, size);
 	}
 
 
@@ -39,11 +34,7 @@
 		int zero
 		)
 	{
-		return allow_realloc_h(
-			alloc_get_handle_s(alloc_get_global_state(), old_size),
-			ptr, old_size,
-			alloc_get_handle_s(alloc_get_global_state(), new_size),
-			new_size, zero);
+		return alloc_realloc(ptr, old_size, new_size, zero);
 	}
 
 

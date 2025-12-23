@@ -1,6 +1,6 @@
 .EXPORT_ALL_VARIABLES:
 
-CFLAGS := -Wall -Wextra -Wno-address-of-packed-member
+CFLAGS := -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE
 
 ifeq ($(M32), 1)
 CFLAGS += -m32

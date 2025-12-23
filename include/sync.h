@@ -16,6 +16,10 @@
 
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -160,3 +164,8 @@ extern void
 sync_sem_post(
 	sync_sem_t* sem
 	);
+
+
+#ifdef __cplusplus
+}
+#endif

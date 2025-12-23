@@ -24,7 +24,6 @@ fast_rand(
 	void
 	)
 {
-	/* Yes this is multithreaded, yes corruption will occur, no I do not care */
 	r_seed = (1103515245 * r_seed + 12345) & 0x7FFFFFFF;
 	return r_seed;
 }

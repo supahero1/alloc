@@ -69,6 +69,7 @@ test(
 		assert_eq(memcmp(ptrs[0], tmp, size), 0);
 
 		dev_free(tmp, size);
+		dev_free(zero, size);
 	}
 
 	for(size_t i = 0; i < 256; ++i)
@@ -110,6 +111,8 @@ main(
 	{
 		test(i, shuffle);
 	}
+
+	dev_free(shuffle, 256);
 
 	puts("pass");
 

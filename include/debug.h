@@ -186,7 +186,6 @@ assert_failed(										\
 #define assert_used assert_attr(used)
 #define assert_packed assert_attr(packed)
 
-
 #ifdef __cplusplus
 }
 #endif
