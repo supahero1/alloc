@@ -198,7 +198,6 @@ MACRO_FORMAT_TYPE((x) 0)
 #define MACRO_CONTAINER_OF(ptr, type, member)	\
 ((type*)((char*)(ptr) - offsetof(type, member)))
 
-
 #ifdef __cplusplus
 }
 #endif

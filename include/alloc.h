@@ -20,6 +20,8 @@
 extern "C" {
 #endif
 
+#include "macro.h"
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -41,6 +43,10 @@ extern "C" {
 
 #ifndef _nonnull_
 	#define _nonnull_
+#endif
+
+#ifndef _inline_
+	#define _inline_ __attribute__((always_inline)) inline
 #endif
 
 #ifndef _in_
@@ -80,6 +86,8 @@ typedef enum alloc_handle_flag : alloc_t
 	ALLOC_HANDLE_FLAG_NONE					= 0,
 	ALLOC_HANDLE_FLAG_IMMEDIATE_FREE		= 1 << 0,
 	ALLOC_HANDLE_FLAG_DO_NOT_FREE			= 1 << 1,
+	ALLOC_HANDLE_FLAG_THREAD_LOCAL			= 1 << 2,
+	MACRO_ENUM_BITS(ALLOC_HANDLE_FLAG)
 }
 alloc_handle_flag_t;
 
@@ -137,7 +145,7 @@ alloc_get_page_size(
 	);
 
 
-_const_func_ alloc_t
+extern _const_func_ alloc_t
 alloc_get_default_block_size(
 	void
 	);
@@ -345,7 +353,7 @@ alloc_realloc_h(
 
 
 extern void*
-allow_realloc_uh(
+alloc_realloc_uh(
 	_opaque_ alloc_handle_t* old_handle,
 	_opaque_ void* ptr,
 	alloc_t old_size,

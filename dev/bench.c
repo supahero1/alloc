@@ -5,7 +5,7 @@
 #include <pthread.h>
 
 #define OPERATIONS 0x10000
-#define THREADS 0x8
+#define THREADS 0x10
 #define POINTERS 0x100
 
 
@@ -24,7 +24,6 @@ fast_rand(
 	void
 	)
 {
-	/* Yes this is multithreaded, yes corruption will occur, no I do not care */
 	r_seed = (1103515245 * r_seed + 12345) & 0x7FFFFFFF;
 	return r_seed;
 }
