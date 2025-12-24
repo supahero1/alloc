@@ -5,7 +5,7 @@
 #include <pthread.h>
 
 #define OPERATIONS 0x10000
-#define THREADS 0x8
+#define THREADS 0x10
 #define POINTERS 0x100
 
 

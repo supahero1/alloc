@@ -45,6 +45,10 @@ extern "C" {
 	#define _nonnull_
 #endif
 
+#ifndef _inline_
+	#define _inline_ __attribute__((always_inline)) inline
+#endif
+
 #ifndef _in_
 	#define _in_ const
 #endif
@@ -306,20 +310,6 @@ alloc_handle_get_flags_uh(
 
 
 extern _alloc_func_ void*
-alloc_alloc_l(
-	alloc_t size,
-	int zero
-	);
-
-
-extern _alloc_func_ void*
-alloc_alloc_ul(
-	alloc_t size,
-	int zero
-	);
-
-
-extern _alloc_func_ void*
 alloc_alloc_h(
 	_opaque_ alloc_handle_t* handle,
 	alloc_t size,
@@ -336,20 +326,6 @@ alloc_alloc_uh(
 
 
 extern void
-alloc_free_l(
-	_opaque_ void* ptr,
-	alloc_t size
-	);
-
-
-extern void
-alloc_free_ul(
-	_opaque_ void* ptr,
-	alloc_t size
-	);
-
-
-extern void
 alloc_free_h(
 	_opaque_ alloc_handle_t* handle,
 	_opaque_ void* ptr,
@@ -362,24 +338,6 @@ alloc_free_uh(
 	_opaque_ alloc_handle_t* handle,
 	_opaque_ void* ptr,
 	alloc_t size
-	);
-
-
-extern void*
-alloc_realloc_l(
-	_opaque_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size,
-	int zero
-	);
-
-
-extern void*
-alloc_realloc_ul(
-	_opaque_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size,
-	int zero
 	);
 
 

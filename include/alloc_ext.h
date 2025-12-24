@@ -22,10 +22,6 @@ extern "C" {
 
 #include "alloc.h"
 
-#ifndef _inline_
-	#define _inline_ __attribute__((always_inline)) inline
-#endif
-
 
 _inline_ _pure_func_ _opaque_ alloc_handle_t*
 alloc_get_handle(
@@ -258,21 +254,21 @@ alloc_handle_get_flags_u(
 })
 
 
-#define alloc_alloc(ptr, size, zero)		\
-({											\
-	alloc_t _size = sizeof(*ptr) * (size);	\
-	int _zero = (zero);						\
-											\
-	alloc_alloc_l(_size, _zero);			\
+#define alloc_alloc(ptr, size, zero)						\
+({															\
+	alloc_t _size = sizeof(*ptr) * (size);					\
+	int _zero = (zero);										\
+															\
+	alloc_alloc_h(alloc_get_handle(_size), _size, _zero);	\
 })
 
 
-#define alloc_alloc_u(ptr, size, zero)		\
-({											\
-	alloc_t _size = sizeof(*ptr) * (size);	\
-	int _zero = (zero);						\
-											\
-	alloc_alloc_ul(_size, _zero);			\
+#define alloc_alloc_u(ptr, size, zero)						\
+({															\
+	alloc_t _size = sizeof(*ptr) * (size);					\
+	int _zero = (zero);										\
+															\
+	alloc_alloc_uh(alloc_get_handle(_size), _size, _zero);	\
 })
 
 
@@ -296,21 +292,21 @@ alloc_handle_get_flags_u(
 })
 
 
-#define alloc_free(ptr, size)				\
-({											\
-	__typeof__(ptr) _ptr = (ptr);			\
-	alloc_t _size = sizeof(*_ptr) * (size);	\
-											\
-	alloc_free_l(_ptr, _size);				\
+#define alloc_free(ptr, size)							\
+({														\
+	__typeof__(ptr) _ptr = (ptr);						\
+	alloc_t _size = sizeof(*_ptr) * (size);				\
+														\
+	alloc_free_h(alloc_get_handle(_size), _ptr, _size);	\
 })
 
 
-#define alloc_free_u(ptr, size)				\
-({											\
-	__typeof__(ptr) _ptr = (ptr);			\
-	alloc_t _size = sizeof(*_ptr) * (size);	\
-											\
-	alloc_free_ul(_ptr, _size);				\
+#define alloc_free_u(ptr, size)								\
+({															\
+	__typeof__(ptr) _ptr = (ptr);							\
+	alloc_t _size = sizeof(*_ptr) * (size);					\
+															\
+	alloc_free_uh(alloc_get_handle(_size), _ptr, _size);	\
 })
 
 
@@ -361,9 +357,11 @@ alloc_handle_get_flags_u(
 	alloc_t _new_size = sizeof(*_ptr) * (new_size);		\
 	int _zero = (zero);									\
 														\
-	alloc_realloc_l(									\
+	alloc_realloc_h(									\
+		alloc_get_handle(_old_size),					\
 		_ptr,											\
 		_old_size,										\
+		alloc_get_handle(_new_size),					\
 		_new_size,										\
 		_zero											\
 	);													\
@@ -377,9 +375,11 @@ alloc_handle_get_flags_u(
 	alloc_t _new_size = sizeof(*_ptr) * (new_size);		\
 	int _zero = (zero);									\
 														\
-	alloc_realloc_ul(									\
+	alloc_realloc_uh(									\
+		alloc_get_handle(_old_size),					\
 		_ptr,											\
 		_old_size,										\
+		alloc_get_handle(_new_size),					\
 		_new_size,										\
 		_zero											\
 	);													\

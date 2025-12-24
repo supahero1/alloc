@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024 Franciszek Balcerak
+ *   Copyright 2024-2025 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,10 +16,6 @@
 
 #ifndef ALLOC_DEFAULT_BLOCK_SIZE
 	#define ALLOC_DEFAULT_BLOCK_SIZE MACRO_POWER_OF_2(20)
-#endif
-
-#ifndef ALLOC_THREAD_LOCAL
-	#define ALLOC_THREAD_LOCAL 0
 #endif
 
 #include "../include/sync.h"
@@ -59,31 +55,6 @@
 		GetSystemInfo(&info);
 		return info.dwPageSize;
 	}
-
-
-	#if ALLOC_THREAD_LOCAL == 1
-		private DWORD alloc_fls_index;
-
-
-		private void NTAPI
-		alloc_destructor_wrapper(
-			void* arg
-			)
-		{
-			void (*cleanup)(void) = arg;
-			cleanup();
-		}
-
-
-		private void
-		alloc_register_thread_local_cleanup(
-			void (*cleanup)(void)
-			)
-		{
-			alloc_fls_index = FlsAlloc(alloc_destructor_wrapper);
-			FlsSetValue(alloc_fls_index, cleanup);
-		}
-	#endif
 
 
 	_alloc_func_ void*
@@ -229,31 +200,6 @@
 	{
 		return getpagesize();
 	}
-
-
-	#if ALLOC_THREAD_LOCAL == 1
-		private pthread_key_t alloc_thread_key;
-
-
-		private void
-		alloc_destructor_wrapper(
-			void* arg
-			)
-		{
-			void (*cleanup)(void) = arg;
-			cleanup();
-		}
-
-
-		private void
-		alloc_register_thread_local_cleanup(
-			void (*cleanup)(void)
-			)
-		{
-			pthread_key_create(&alloc_thread_key, alloc_destructor_wrapper);
-			pthread_setspecific(alloc_thread_key, cleanup);
-		}
-	#endif
 
 
 	_alloc_func_ void*
@@ -423,9 +369,6 @@ typedef struct _packed_ alloc_header
 {
 	void* prev;
 	void* next;
-#if ALLOC_THREAD_LOCAL == 1
-	void* handle;
-#endif
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 }
@@ -452,9 +395,6 @@ struct _packed_ alloc_1_block
 {
 	alloc_1_block_t* prev;
 	alloc_1_block_t* next;
-#if ALLOC_THREAD_LOCAL == 1
-	void* handle;
-#endif
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 	uint8_t count;
@@ -470,9 +410,6 @@ struct _packed_ alloc_2
 {
 	alloc_2_t* prev;
 	alloc_2_t* next;
-#if ALLOC_THREAD_LOCAL == 1
-	void* handle;
-#endif
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 	uint16_t used;
@@ -489,9 +426,6 @@ struct _packed_ alloc_4
 {
 	alloc_4_t* prev;
 	alloc_4_t* next;
-#if ALLOC_THREAD_LOCAL == 1
-	void* handle;
-#endif
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 	uint32_t used;
@@ -550,8 +484,10 @@ static_assert(sizeof(alloc_handle_t) >= sizeof(alloc_handle_impl_t),
 private alloc_handle_info_t alloc_default_handle_info[] =
 (alloc_handle_info_t[])
 {
-/*   0*/{ .alloc_size = 1, .block_size =
-			sizeof(alloc_1_block_t) + sizeof(alloc_1_t), .alignment = 1 },
+#if ALLOC_DEFAULT_BLOCK_SIZE >= MACRO_POWER_OF_2(1)
+/*   0*/{ .alloc_size = MACRO_POWER_OF_2(0), .block_size =
+			sizeof(alloc_1_block_t) , .alignment = MACRO_POWER_OF_2(0) },
+#endif
 #if ALLOC_DEFAULT_BLOCK_SIZE >= MACRO_POWER_OF_2(2)
 /*   1*/{ .alloc_size = MACRO_POWER_OF_2(1), .block_size =
 			ALLOC_DEFAULT_BLOCK_SIZE, .alignment = MACRO_POWER_OF_2(1) },
@@ -678,24 +614,10 @@ private alloc_state_info_t alloc_default_state_info =
 private alloc_t alloc_page_size;
 private alloc_t alloc_page_size_mask;
 private uint32_t alloc_page_size_shift;
-private
-#if ALLOC_THREAD_LOCAL == 1
-	thread_local
-#endif
-	const alloc_state_t* alloc_global_state;
+private const alloc_state_t* alloc_global_state;
 
 
 
-
-
-private void
-alloc_library_cleanup(
-	void
-	)
-{
-	alloc_free_state(alloc_global_state);
-	alloc_global_state = NULL;
-}
 
 
 private assert_ctor void
@@ -710,26 +632,17 @@ alloc_library_init(
 
 	alloc_page_size_mask = alloc_page_size - 1;
 	alloc_page_size_shift = MACRO_LOG2(alloc_page_size);
-
-#if ALLOC_THREAD_LOCAL == 1
-	alloc_register_thread_local_cleanup(alloc_library_cleanup);
-#endif
 }
 
 
-#if ALLOC_THREAD_LOCAL != 1
-
-
-	private assert_dtor void
-	alloc_library_free(
-		void
-		)
-	{
-		alloc_library_cleanup();
-	}
-
-
-#endif
+private assert_dtor void
+alloc_library_free(
+	void
+	)
+{
+	alloc_free_state(alloc_global_state);
+	alloc_global_state = NULL;
+}
 
 
 _const_func_ const alloc_state_t*
@@ -737,7 +650,7 @@ alloc_get_global_state(
 	void
 	)
 {
-	if(!alloc_global_state)
+	if(assert_unlikely(!alloc_global_state))
 	{
 		alloc_global_state = alloc_alloc_state(&alloc_default_state_info);
 		assert_not_null(alloc_global_state);
@@ -778,7 +691,7 @@ alloc_alloc_1_fn(
 	alloc_t capacity = stride - sizeof(alloc_1_t);
 
 	alloc_1_block_t* block = (void*) handle->head;
-	if(!block)
+	if(assert_unlikely(!block))
 	{
 		void* real_ptr = alloc_alloc_virtual_aligned(
 			handle->block_size, handle->block_size, (void**) &block);
@@ -788,10 +701,6 @@ alloc_alloc_1_fn(
 		}
 
 		assert_lt((void*) block - real_ptr, UINT32_MAX);
-
-#if ALLOC_THREAD_LOCAL == 1
-		block->handle = handle;
-#endif
 
 		block->real_ptr_off = (void*) block - real_ptr;
 		block->alloc_size = 1;
@@ -821,9 +730,9 @@ alloc_alloc_1_fn(
 	++block->count;
 	++alloc->count;
 
-	if(alloc->count == capacity)
+	if(assert_unlikely(alloc->count == capacity))
 	{
-		if(block->count == capacity * handle->alloc_limit)
+		if(assert_unlikely(block->count == capacity * handle->alloc_limit))
 		{
 			handle->head = (void*) block->next;
 
@@ -898,7 +807,7 @@ alloc_free_1_fn(
 	--block->count;
 	--alloc->count;
 
-	if(
+	if(assert_unlikely(
 		block->count == 0 &&
 		(
 			(handle->flags & ALLOC_HANDLE_FLAG_IMMEDIATE_FREE) ||
@@ -909,7 +818,7 @@ alloc_free_1_fn(
 					handle->alloc_limit * (handle->allocators - 2)
 			)
 		)
-		)
+		))
 	{
 		if(block->prev)
 		{
@@ -967,7 +876,7 @@ alloc_alloc_2_fn(
 	(void) size;
 
 	alloc_2_t* alloc = (void*) handle->head;
-	if(!alloc)
+	if(assert_unlikely(!alloc))
 	{
 		void* real_ptr = alloc_alloc_virtual_aligned(
 			handle->block_size, handle->block_size, (void**) &alloc);
@@ -977,10 +886,6 @@ alloc_alloc_2_fn(
 		}
 
 		assert_lt((void*) alloc - real_ptr, UINT32_MAX);
-
-#if ALLOC_THREAD_LOCAL == 1
-		alloc->handle = handle;
-#endif
 
 		alloc->real_ptr_off = (void*) alloc - real_ptr;
 		alloc->alloc_size = handle->alloc_size;
@@ -996,7 +901,7 @@ alloc_alloc_2_fn(
 
 	void* data = (void*) alloc + handle->padding;
 
-	if(alloc->count == handle->alloc_limit)
+	if(assert_unlikely(alloc->count == handle->alloc_limit))
 	{
 		handle->head = (void*) alloc->next;
 
@@ -1056,7 +961,7 @@ alloc_free_2_fn(
 	--handle->allocations;
 	--alloc->count;
 
-	if(
+	if(assert_unlikely(
 		alloc->count == 0 &&
 		(
 			(handle->flags & ALLOC_HANDLE_FLAG_IMMEDIATE_FREE) ||
@@ -1067,7 +972,7 @@ alloc_free_2_fn(
 					handle->alloc_limit * (handle->allocators - 2)
 			)
 		)
-		)
+		))
 	{
 		if(alloc->prev)
 		{
@@ -1121,7 +1026,7 @@ alloc_alloc_4_fn(
 	(void) size;
 
 	alloc_4_t* alloc = (void*) handle->head;
-	if(!alloc)
+	if(assert_unlikely(!alloc))
 	{
 		void* real_ptr = alloc_alloc_virtual_aligned(
 			handle->block_size, handle->block_size, (void**) &alloc);
@@ -1131,10 +1036,6 @@ alloc_alloc_4_fn(
 		}
 
 		assert_lt((void*) alloc - real_ptr, UINT32_MAX);
-
-#if ALLOC_THREAD_LOCAL == 1
-		alloc->handle = handle;
-#endif
 
 		alloc->real_ptr_off = (void*) alloc - real_ptr;
 		alloc->alloc_size = handle->alloc_size;
@@ -1150,7 +1051,7 @@ alloc_alloc_4_fn(
 
 	void* data = (void*) alloc + handle->padding;
 
-	if(alloc->count == handle->alloc_limit)
+	if(assert_unlikely(alloc->count == handle->alloc_limit))
 	{
 		handle->head = (void*) alloc->next;
 
@@ -1212,7 +1113,7 @@ alloc_free_4_fn(
 	--handle->allocations;
 	--alloc->count;
 
-	if(
+	if(assert_unlikely(
 		alloc->count == 0 &&
 		(
 			(handle->flags & ALLOC_HANDLE_FLAG_IMMEDIATE_FREE) ||
@@ -1223,7 +1124,7 @@ alloc_free_4_fn(
 					handle->alloc_limit * (handle->allocators - 2)
 			)
 		)
-		)
+		))
 	{
 		if(alloc->prev)
 		{
@@ -1297,7 +1198,7 @@ alloc_free_virtual_fn(
 {
 	(void) handle;
 
-	assert_eq(block_ptr, ptr);
+	assert_eq(block_ptr, NULL);
 
 	alloc_free_virtual(ptr, size);
 }
@@ -1346,6 +1247,7 @@ alloc_create_handle(
 	}
 
 
+	assert_neq(info->alloc_size, 0);
 	assert_neq(info->alignment, 0);
 	assert_eq(MACRO_IS_POWER_OF_2(info->alignment), 1);
 
@@ -1364,10 +1266,20 @@ alloc_create_handle(
 	(const alloc_t[])
 	{
 		0,
-		UINT8_MAX - 2,
-		UINT16_MAX - 2,
-		UINT16_MAX - 2,
-		UINT32_MAX - 2
+		ALLOC_1_MAX - 1,
+		ALLOC_2_MAX - 1,
+		ALLOC_2_MAX - 1,
+		ALLOC_4_MAX - 1
+	};
+
+	static const uint32_t header_sizes[] =
+	(const uint32_t[])
+	{
+		0,
+		sizeof(alloc_1_block_t),
+		sizeof(alloc_2_t),
+		sizeof(alloc_2_t),
+		sizeof(alloc_4_t)
 	};
 
 	static const alloc_alloc_fn_t alloc_fns[] =
@@ -1390,28 +1302,18 @@ alloc_create_handle(
 		alloc_free_4_fn
 	};
 
-	static const uint32_t header_sizes[] =
-	(const uint32_t[])
-	{
-		0,
-		sizeof(alloc_1_block_t),
-		sizeof(alloc_2_t),
-		sizeof(alloc_2_t),
-		sizeof(alloc_4_t)
-	};
-
 	alloc_t table_idx = MACRO_MIN(info->alloc_size, 4U);
 
 
 	if(info->alloc_size == 1)
 	{
 		alloc_t block_size = info->block_size;
-		block_size = MACRO_MIN(block_size, block_size_max[table_idx]);
+		block_size = MACRO_MIN(block_size, block_size_max[1]);
 		block_size = MACRO_MAX(block_size, alloc_page_size);
 		block_size = MACRO_NEXT_OR_EQUAL_POWER_OF_2(block_size);
 
 		alloc_t avail_bytes = block_size - sizeof(alloc_1_block_t);
-		alloc_t limit_max = alloc_limit_max[table_idx];
+		alloc_t limit_max = alloc_limit_max[1];
 
 		alloc_t k_a = ALLOC_1_MAX - 1;
 		alloc_t stride_a = sizeof(alloc_1_t) + k_a;
@@ -1455,8 +1357,8 @@ alloc_create_handle(
 		handle_impl->alloc_size = 1;
 		handle_impl->block_size = block_size;
 
-		handle_impl->alloc_fn = alloc_fns[table_idx];
-		handle_impl->free_fn = free_fns[table_idx];
+		handle_impl->alloc_fn = alloc_fns[1];
+		handle_impl->free_fn = free_fns[1];
 
 		return;
 	}
@@ -1579,19 +1481,9 @@ alloc_alloc_state(
 	for(; handle_info < handle_info_end; ++handle_info, ++handle)
 	{
 		alloc_create_handle(handle_info, handle);
-
-#if ALLOC_THREAD_LOCAL == 1
-		alloc_handle_impl_t* handle_impl = (void*) handle;
-		handle_impl->flags = ALLOC_HANDLE_FLAG_THREAD_LOCAL;
-#endif
 	}
 
 	alloc_create_handle(NULL, handle);
-
-#if ALLOC_THREAD_LOCAL == 1
-	alloc_handle_impl_t* handle_impl = (void*) handle;
-	handle_impl->flags = ALLOC_HANDLE_FLAG_THREAD_LOCAL;
-#endif
 
 
 	return state;
@@ -1669,13 +1561,16 @@ alloc_get_handle_s(
 {
 	assert_not_null(state);
 
-	if(size == 0)
+	if(assert_unlikely(size == 0))
 	{
 		return NULL;
 	}
 
 	uint32_t idx = state->idx_fn(size);
-	idx = MACRO_MIN(idx, state->handle_count - 1);
+	if(assert_unlikely(idx >= state->handle_count))
+	{
+		idx = state->handle_count - 1;
+	}
 
 	return &state->handles[idx];
 }
@@ -1822,72 +1717,13 @@ alloc_handle_get_flags_uh(
 
 
 _alloc_func_ void*
-alloc_alloc_l(
-	alloc_t size,
-	int zero
-	)
-{
-	if(!size)
-	{
-		return NULL;
-	}
-
-#ifndef ALLOC_DEBUG
-	const alloc_state_t* state = alloc_get_global_state();
-	const alloc_handle_t* handle = alloc_get_handle_s(state, size);
-
-	return alloc_alloc_h(handle, size, zero);
-#else
-	return zero ? calloc(1, size) : malloc(size);
-#endif
-}
-
-
-_alloc_func_ void*
-alloc_alloc_ul(
-	alloc_t size,
-	int zero
-	)
-{
-	if(!size)
-	{
-		return NULL;
-	}
-
-#ifndef ALLOC_DEBUG
-	const alloc_state_t* state = alloc_get_global_state();
-	const alloc_handle_t* handle = alloc_get_handle_s(state, size);
-
-	return alloc_alloc_uh(handle, size, zero);
-#else
-	return zero ? calloc(1, size) : malloc(size);
-#endif
-}
-
-
-private void*
-alloc_get_header(
-	const alloc_handle_impl_t* handle,
-	_in_ void* ptr
-	)
-{
-	if(alloc_handle_is_virtual(handle))
-	{
-		return (void*) ptr;
-	}
-
-	return MACRO_ALIGN_DOWN((void*) ptr, handle->block_size - 1);
-}
-
-
-_alloc_func_ void*
 alloc_alloc_h(
 	_opaque_ alloc_handle_t* handle,
 	alloc_t size,
 	int zero
 	)
 {
-	if(!size)
+	if(assert_unlikely(!size))
 	{
 		return NULL;
 	}
@@ -1911,7 +1747,7 @@ alloc_alloc_uh(
 	int zero
 	)
 {
-	if(!size)
+	if(assert_unlikely(!size))
 	{
 		return NULL;
 	}
@@ -1928,87 +1764,6 @@ alloc_alloc_uh(
 }
 
 
-private _pure_func_ _opaque_ alloc_handle_t*
-alloc_get_handle(
-	_opaque_ void* ptr,
-	alloc_t size
-	)
-{
-	assert_ptr(ptr, size);
-
-	if(!ptr)
-	{
-		return NULL;
-	}
-
-	const alloc_state_t* state = alloc_get_global_state();
-	const alloc_handle_t* handle = alloc_get_handle_s(state, size);
-
-#if ALLOC_THREAD_LOCAL == 1
-	if(!alloc_handle_is_virtual((void*) handle))
-	{
-		const alloc_header_t* header = alloc_get_header((void*) handle, ptr);
-		assert_not_null(header->handle);
-
-		assert_eq(((const alloc_handle_impl_t*) header->handle)->flags
-			& ALLOC_HANDLE_FLAG_THREAD_LOCAL,
-			ALLOC_HANDLE_FLAG_THREAD_LOCAL,
-			fprintf(stderr, "alloc_get_handle(): received a pointer "
-				"that was not allocated with the default global state\n")
-			);
-
-		return header->handle;
-	}
-#endif
-
-	return handle;
-}
-
-
-void
-alloc_free_l(
-	_opaque_ void* ptr,
-	alloc_t size
-	)
-{
-#ifndef ALLOC_DEBUG
-	assert_ptr(ptr, size);
-
-	if(!ptr)
-	{
-		return;
-	}
-
-	const alloc_handle_t* handle = alloc_get_handle(ptr, size);
-	alloc_free_h(handle, ptr, size);
-#else
-	free((void*) ptr);
-#endif
-}
-
-
-void
-alloc_free_ul(
-	_opaque_ void* ptr,
-	alloc_t size
-	)
-{
-#ifndef ALLOC_DEBUG
-	assert_ptr(ptr, size);
-
-	if(!ptr)
-	{
-		return;
-	}
-
-	const alloc_handle_t* handle = alloc_get_handle(ptr, size);
-	alloc_free_uh(handle, ptr, size);
-#else
-	free((void*) ptr);
-#endif
-}
-
-
 #undef ALLOC_FREE
 
 
@@ -2021,7 +1776,7 @@ alloc_free_h(
 {
 	assert_ptr(ptr, size);
 
-	if(!ptr)
+	if(assert_unlikely(!ptr))
 	{
 		return;
 	}
@@ -2034,6 +1789,16 @@ alloc_free_h(
 }
 
 
+private _inline_ alloc_header_t*
+alloc_get_header(
+	const alloc_handle_impl_t* handle,
+	_in_ void* ptr
+	)
+{
+	return MACRO_ALIGN_DOWN((void*) ptr, handle->block_size - 1);
+}
+
+
 void
 alloc_free_uh(
 	_opaque_ alloc_handle_t* handle,
@@ -2043,7 +1808,7 @@ alloc_free_uh(
 {
 	assert_ptr(ptr, size);
 
-	if(!ptr)
+	if(assert_unlikely(!ptr))
 	{
 		return;
 	}
@@ -2052,30 +1817,34 @@ alloc_free_uh(
 
 #ifndef ALLOC_DEBUG
 	alloc_handle_impl_t* handle_impl = (void*) handle;
-	alloc_header_t* header = alloc_get_header(handle_impl, ptr);
+	alloc_header_t* header = NULL;
 
-	assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
-		{
-			if(alloc_handle_is_virtual(handle_impl)) break;
-			char format[256];
-			snprintf(format, sizeof(format), "alloc_free(): invalid "
-				"pointer alignment, got ptr = %s and size = %s\n",
-				MACRO_FORMAT_TYPE(ptr), MACRO_FORMAT_TYPE(size));
-			fprintf(stderr, format, ptr, size);
-		}
-		);
+	if(assert_likely(!alloc_handle_is_virtual(handle_impl)))
+	{
+		header = alloc_get_header(handle_impl, ptr);
 
-	assert_eq(header->alloc_size, handle_impl->alloc_size,
-		{
-			if(alloc_handle_is_virtual(handle_impl)) break;
-			char format[256];
-			snprintf(format, sizeof(format), "alloc_free(): mismatch "
-				"between passed size %s and (next or equal power of 2)"
-				" pointer size %s\n", MACRO_FORMAT_TYPE(size),
-				MACRO_FORMAT_TYPE(header->alloc_size));
-			fprintf(stderr, format, size, header->alloc_size);
-		}
-		);
+		assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
+			{
+				if(!MACRO_IS_POWER_OF_2(size)) break;
+				char format[256];
+				snprintf(format, sizeof(format), "alloc_free(): invalid "
+					"pointer alignment, got ptr = %s and size = %s\n",
+					MACRO_FORMAT_TYPE(ptr), MACRO_FORMAT_TYPE(size));
+				fprintf(stderr, format, ptr, size);
+			}
+			);
+
+		assert_eq(header->alloc_size, handle_impl->alloc_size,
+			{
+				char format[256];
+				snprintf(format, sizeof(format), "alloc_free(): mismatch "
+					"between passed size %s and (next or equal power of 2)"
+					" pointer size %s\n", MACRO_FORMAT_TYPE(size),
+					MACRO_FORMAT_TYPE(header->alloc_size));
+				fprintf(stderr, format, size, header->alloc_size);
+			}
+			);
+	}
 
 	handle_impl->free_fn(handle_impl, header, (void*) ptr, size);
 
@@ -2093,16 +1862,14 @@ alloc_free_uh(
 	do																	\
 	{																	\
 		assert_ptr(ptr, old_size);										\
-		assert_not_null(old_handle);									\
-		assert_not_null(new_handle);									\
 																		\
-		if(!new_size)													\
+		if(assert_unlikely(!new_size))									\
 		{																\
 			free_fn(old_handle, ptr, old_size);							\
 			return NULL;												\
 		}																\
 																		\
-		if(!ptr)														\
+		if(assert_unlikely(!ptr))										\
 		{																\
 			return alloc_fn(new_handle, new_size, zero);				\
 		}																\
@@ -2124,7 +1891,7 @@ alloc_free_uh(
 		}																\
 																		\
 		void* new_ptr = alloc_fn(new_handle, new_size, zero);			\
-		if(!new_ptr)													\
+		if(assert_unlikely(!new_ptr))									\
 		{																\
 			return NULL;												\
 		}																\
@@ -2154,38 +1921,6 @@ alloc_free_uh(
 	}																	\
 	while(0)
 #endif
-
-
-void*
-alloc_realloc_l(
-	_opaque_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size,
-	int zero
-	)
-{
-	const alloc_state_t* state = alloc_get_global_state();
-	const alloc_handle_t* old_handle = alloc_get_handle(ptr, old_size);
-	const alloc_handle_t* new_handle = alloc_get_handle_s(state, new_size);
-
-	ALLOC_REALLOC(alloc_alloc_h, alloc_free_h);
-}
-
-
-void*
-alloc_realloc_ul(
-	_opaque_ void* ptr,
-	alloc_t old_size,
-	alloc_t new_size,
-	int zero
-	)
-{
-	const alloc_state_t* state = alloc_get_global_state();
-	const alloc_handle_t* old_handle = alloc_get_handle(ptr, old_size);
-	const alloc_handle_t* new_handle = alloc_get_handle_s(state, new_size);
-
-	ALLOC_REALLOC(alloc_alloc_uh, alloc_free_uh);
-}
 
 
 void*

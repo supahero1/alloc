@@ -51,13 +51,16 @@ location_logger(
 
 #define ASSERT_NULL ((const volatile void*) 0)
 
+#define assert_unlikely(x) __builtin_expect(!!(x), 0)
+#define assert_likely(x) __builtin_expect(!!(x), 1)
+
 #define hard_assert_base(a, b, Op, ROp, ...)	\
 do												\
 {												\
 	typeof(b) _a = (a);							\
 	typeof(b) _b = (b);							\
 												\
-	if(!__builtin_expect(_a Op _b, 1))			\
+	if(!assert_likely(_a Op _b))				\
 	{											\
 		__VA_ARGS__ __VA_OPT__(;)				\
 												\
@@ -75,7 +78,7 @@ while(0)
 hard_assert_not_null(ptr,							\
 	{												\
 		bool is_zero = sizeof(*ptr) * size == 0;	\
-		if(__builtin_expect(is_zero, 1)) break;		\
+		if(assert_likely(is_zero)) break;			\
 		__VA_ARGS__ __VA_OPT__(;)					\
 	}												\
 	)
@@ -102,7 +105,7 @@ do											\
 	typeof(b) _a = (a);						\
 	typeof(b) _b = (b);						\
 											\
-	if(!__builtin_expect(_a Op _b, 1))		\
+	if(!assert_likely(_a Op _b))			\
 	{										\
 		__VA_ARGS__ __VA_OPT__(;)			\
 											\
@@ -120,7 +123,7 @@ while(0)
 empty_assert_base(ptr, ASSERT_NULL, !=,				\
 	{												\
 		bool is_zero = sizeof(*ptr) * size == 0;	\
-		if(__builtin_expect(is_zero, 1)) break;		\
+		if(assert_likely(is_zero)) break;			\
 	}												\
 	)
 #define empty_assert_lt(a, b, ...) empty_assert_base(a, b, <)
