@@ -18,14 +18,39 @@
 	#define ALLOC_DEFAULT_BLOCK_SIZE MACRO_POWER_OF_2(20)
 #endif
 
+#ifndef ALLOC_RED_ZONE_BYTES
+	#define ALLOC_RED_ZONE_BYTES 1U
+#endif
+
+#if defined(NDEBUG) || defined(ALLOC_DEBUG)
+	#undef ALLOC_RED_ZONE_BYTES
+	#define ALLOC_RED_ZONE_BYTES 0U
+#endif
+
 #include "../include/sync.h"
 #include "../include/debug.h"
 #include "../include/alloc.h"
 
-#if !defined(NDEBUG) && (defined(VALGRIND) || __has_include(<valgrind/valgrind.h>))
+#if !defined(NDEBUG) && \
+	(defined(VALGRIND) || __has_include(<valgrind/valgrind.h>))
+
 	#define ALLOC_VALGRIND
 
 	#include <valgrind/valgrind.h>
+
+	#define ALLOC_VALGRIND_DISABLE_ERROR_REPORTING()	\
+	VALGRIND_DISABLE_ERROR_REPORTING
+	#define ALLOC_VALGRIND_ENABLE_ERROR_REPORTING()	\
+	VALGRIND_ENABLE_ERROR_REPORTING
+	#define ALLOC_VALGRIND_ALLOC(ptr, size, zero)	\
+	VALGRIND_MALLOCLIKE_BLOCK(ptr, size, ALLOC_RED_ZONE_BYTES, zero)
+	#define ALLOC_VALGRIND_FREE(ptr)	\
+	VALGRIND_FREELIKE_BLOCK(ptr, ALLOC_RED_ZONE_BYTES)
+#else
+	#define ALLOC_VALGRIND_DISABLE_ERROR_REPORTING()
+	#define ALLOC_VALGRIND_ENABLE_ERROR_REPORTING()
+	#define ALLOC_VALGRIND_ALLOC(ptr, size, zero)
+	#define ALLOC_VALGRIND_FREE(ptr)
 #endif
 
 #ifdef ALLOC_DEBUG
@@ -55,6 +80,23 @@
 		GetSystemInfo(&info);
 		return info.dwPageSize;
 	}
+
+
+	#if ALLOC_RED_ZONE_BYTES != 0
+
+
+		private uint32_t
+		alloc_get_scrambled_time(
+			void
+			)
+		{
+			FILETIME ft;
+			GetSystemTimeAsFileTime(&ft);
+			return ft.dwHighDateTime * ft.dwLowDateTime;
+		}
+
+
+	#endif
 
 
 	_alloc_func_ void*
@@ -181,7 +223,7 @@
 			return NULL;
 		}
 
-		(void) memcpy(new_ptr, ptr, old_size);
+		memcpy(new_ptr, ptr, old_size);
 		alloc_free_virtual(ptr, old_size);
 
 		return new_ptr;
@@ -200,6 +242,24 @@
 	{
 		return getpagesize();
 	}
+
+
+	#if ALLOC_RED_ZONE_BYTES != 0
+		#include <sys/time.h>
+
+
+		private uint32_t
+		alloc_get_scrambled_time(
+			void
+			)
+		{
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			return tv.tv_sec * tv.tv_usec;
+		}
+
+
+	#endif
 
 
 	_alloc_func_ void*
@@ -344,7 +404,8 @@ alloc_realloc_virtual_aligned(
 		return alloc_alloc_virtual_aligned(new_size, alignment, new_ptr);
 	}
 
-	void* new_real_ptr = alloc_alloc_virtual_aligned(new_size, alignment, new_ptr);
+	void* new_real_ptr =
+		alloc_alloc_virtual_aligned(new_size, alignment, new_ptr);
 	if(!new_real_ptr)
 	{
 		return NULL;
@@ -354,7 +415,7 @@ alloc_realloc_virtual_aligned(
 	void* aligned_new_ptr = *new_ptr;
 
 	alloc_t copy_size = MACRO_MIN(old_size, new_size);
-	(void) memcpy(aligned_new_ptr, aligned_old_ptr, copy_size);
+	memcpy(aligned_new_ptr, aligned_old_ptr, copy_size);
 
 	alloc_free_virtual_aligned(real_ptr, old_size, alignment);
 
@@ -468,6 +529,7 @@ struct alloc_handle_impl
 	alloc_t alloc_limit;
 	alloc_t alloc_size;
 	alloc_t block_size;
+	alloc_t alignment;
 
 	alloc_handle_flag_t flags;
 
@@ -617,6 +679,15 @@ private uint32_t alloc_page_size_shift;
 private const alloc_state_t* alloc_global_state;
 
 
+#if ALLOC_RED_ZONE_BYTES != 0
+
+
+	private uint32_t alloc_red_zone_random;
+
+
+#endif
+
+
 
 
 
@@ -632,6 +703,10 @@ alloc_library_init(
 
 	alloc_page_size_mask = alloc_page_size - 1;
 	alloc_page_size_shift = MACRO_LOG2(alloc_page_size);
+
+#if ALLOC_RED_ZONE_BYTES != 0
+	alloc_red_zone_random = alloc_get_scrambled_time();
+#endif
 }
 
 
@@ -675,6 +750,15 @@ alloc_get_default_block_size(
 	)
 {
 	return ALLOC_DEFAULT_BLOCK_SIZE;
+}
+
+
+_const_func_ alloc_t
+alloc_get_red_zone_bytes(
+	void
+	)
+{
+	return ALLOC_RED_ZONE_BYTES;
 }
 
 
@@ -754,10 +838,6 @@ alloc_alloc_1_fn(
 	{
 		uint8_t* ptr = alloc->data + alloc->free;
 
-#ifdef ALLOC_VALGRIND
-		VALGRIND_DISABLE_ERROR_REPORTING;
-#endif
-
 		alloc->free = *ptr;
 
 		if(zero)
@@ -765,21 +845,10 @@ alloc_alloc_1_fn(
 			*ptr = 0;
 		}
 
-#ifdef ALLOC_VALGRIND
-		VALGRIND_ENABLE_ERROR_REPORTING;
-		VALGRIND_MALLOCLIKE_BLOCK(ptr, 1, 0, zero);
-#endif
-
 		return ptr;
 	}
 
-	uint8_t* ptr = alloc->data + alloc->used++;
-
-#ifdef ALLOC_VALGRIND
-	VALGRIND_MALLOCLIKE_BLOCK(ptr, 1, 0, 1);
-#endif
-
-	return ptr;
+	return alloc->data + alloc->used++;
 }
 
 
@@ -917,32 +986,17 @@ alloc_alloc_2_fn(
 	{
 		void* ptr = data + alloc->free * handle->alloc_size;
 
-#ifdef ALLOC_VALGRIND
-		VALGRIND_DISABLE_ERROR_REPORTING;
-#endif
-
-		(void) memcpy(&alloc->free, ptr, 2);
+		memcpy(&alloc->free, ptr, 2);
 
 		if(zero)
 		{
-			(void) memset(ptr, 0, handle->alloc_size);
+			memset(ptr, 0, handle->alloc_size);
 		}
-
-#ifdef ALLOC_VALGRIND
-		VALGRIND_ENABLE_ERROR_REPORTING;
-		VALGRIND_MALLOCLIKE_BLOCK(ptr, handle->alloc_size, 0, zero);
-#endif
 
 		return ptr;
 	}
 
-	void* ptr = data + alloc->used++ * handle->alloc_size;
-
-#ifdef ALLOC_VALGRIND
-	VALGRIND_MALLOCLIKE_BLOCK(ptr, handle->alloc_size, 0, 1);
-#endif
-
-	return ptr;
+	return data + alloc->used++ * handle->alloc_size;
 }
 
 
@@ -1008,7 +1062,7 @@ alloc_free_2_fn(
 		}
 
 
-		(void) memcpy(ptr, &alloc->free, 2);
+		memcpy(ptr, &alloc->free, 2);
 
 		void* data = (void*) alloc + handle->padding;
 		alloc->free = (ptr - data) / handle->alloc_size;
@@ -1069,32 +1123,17 @@ alloc_alloc_4_fn(
 
 		void* ptr = data + alloc->free * handle->alloc_size;
 
-#ifdef ALLOC_VALGRIND
-		VALGRIND_DISABLE_ERROR_REPORTING;
-#endif
-
-		(void) memcpy(&alloc->free, ptr, 4);
+		memcpy(&alloc->free, ptr, 4);
 
 		if(zero)
 		{
-			(void) memset(ptr, 0, handle->alloc_size);
+			memset(ptr, 0, handle->alloc_size);
 		}
-
-#ifdef ALLOC_VALGRIND
-		VALGRIND_ENABLE_ERROR_REPORTING;
-		VALGRIND_MALLOCLIKE_BLOCK(ptr, handle->alloc_size, 0, zero);
-#endif
 
 		return ptr;
 	}
 
-	void* ptr = data + alloc->used++ * handle->alloc_size;
-
-#ifdef ALLOC_VALGRIND
-	VALGRIND_MALLOCLIKE_BLOCK(ptr, handle->alloc_size, 0, 1);
-#endif
-
-	return ptr;
+	return data + alloc->used++ * handle->alloc_size;
 }
 
 
@@ -1160,7 +1199,7 @@ alloc_free_4_fn(
 		}
 
 
-		(void) memcpy(ptr, &alloc->free, 4);
+		memcpy(ptr, &alloc->free, 4);
 
 		void* data = (void*) alloc + handle->padding;
 		alloc->free = (ptr - data) / handle->alloc_size;
@@ -1178,13 +1217,7 @@ alloc_alloc_virtual_fn(
 	(void) handle;
 	(void) zero;
 
-	void* ptr = alloc_alloc_virtual(size);
-
-#ifdef ALLOC_VALGRIND
-	VALGRIND_MALLOCLIKE_BLOCK(ptr, size, 0, 1);
-#endif
-
-	return ptr;
+	return alloc_alloc_virtual(size);
 }
 
 
@@ -1206,11 +1239,38 @@ alloc_free_virtual_fn(
 
 private int
 alloc_handle_is_virtual(
-	_in_ alloc_handle_impl_t* handle
+	_in_ void* handle
 	)
 {
-	return !handle->block_size;
+	assert_not_null(handle);
+
+	const alloc_handle_impl_t* handle_impl = handle;
+
+	return !handle_impl->block_size;
 }
+
+
+#if ALLOC_RED_ZONE_BYTES != 0
+
+
+	private _const_func_ alloc_t
+	alloc_gcd(
+		alloc_t a,
+		alloc_t b
+		)
+	{
+		while(b != 0)
+		{
+			alloc_t temp = b;
+			b = a % b;
+			a = temp;
+		}
+
+		return a;
+	}
+
+
+#endif
 
 
 void
@@ -1239,6 +1299,7 @@ alloc_create_handle(
 		handle_impl->alloc_limit = 0;
 		handle_impl->alloc_size = 0;
 		handle_impl->block_size = 0;
+		handle_impl->alignment = 0;
 
 		handle_impl->alloc_fn = alloc_alloc_virtual_fn;
 		handle_impl->free_fn = alloc_free_virtual_fn;
@@ -1249,7 +1310,7 @@ alloc_create_handle(
 
 	assert_neq(info->alloc_size, 0);
 	assert_neq(info->alignment, 0);
-	assert_eq(MACRO_IS_POWER_OF_2(info->alignment), 1);
+	assert_true(MACRO_IS_POWER_OF_2(info->alignment));
 
 
 	static const alloc_t block_size_max[] =
@@ -1302,10 +1363,25 @@ alloc_create_handle(
 		alloc_free_4_fn
 	};
 
-	alloc_t table_idx = MACRO_MIN(info->alloc_size, 4U);
+	alloc_t alloc_size = info->alloc_size;
+	alloc_t alignment = MACRO_MIN(info->alignment, alloc_page_size);
+
+#if ALLOC_RED_ZONE_BYTES != 0
+	alloc_t aligned_red_zone =
+		MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, alignment - 1);
+	alloc_size += aligned_red_zone + ALLOC_RED_ZONE_BYTES;
+
+	alloc_t subsequent_alignment = alloc_gcd(alignment, info->alloc_size);
+	assert_neq(subsequent_alignment, 0);
+	assert_true(MACRO_IS_POWER_OF_2(subsequent_alignment));
+
+	alloc_size = MACRO_ALIGN_UP(alloc_size, subsequent_alignment - 1);
+#endif
+
+	alloc_t table_idx = MACRO_MIN(alloc_size, 4U);
 
 
-	if(info->alloc_size == 1)
+	if(alloc_size == 1)
 	{
 		alloc_t block_size = info->block_size;
 		block_size = MACRO_MIN(block_size, block_size_max[1]);
@@ -1356,6 +1432,7 @@ alloc_create_handle(
 		handle_impl->alloc_limit = best_n;
 		handle_impl->alloc_size = 1;
 		handle_impl->block_size = block_size;
+		handle_impl->alignment = 1;
 
 		handle_impl->alloc_fn = alloc_fns[1];
 		handle_impl->free_fn = free_fns[1];
@@ -1365,25 +1442,25 @@ alloc_create_handle(
 
 
 	alloc_t header_size = header_sizes[table_idx];
-	alloc_t mask = info->alignment - 1;
-	alloc_t padding = (header_size + mask) & ~mask;
+	alloc_t padding = MACRO_ALIGN_UP(header_size, alignment - 1);
 
 	alloc_t block_size = info->block_size;
 	block_size = MACRO_MIN(block_size, block_size_max[table_idx]);
 	block_size = MACRO_MAX(block_size, alloc_page_size);
 	block_size = MACRO_NEXT_OR_EQUAL_POWER_OF_2(block_size);
 
-	alloc_t alloc_limit = (block_size - padding) / info->alloc_size;
+	alloc_t alloc_limit = (block_size - padding) / alloc_size;
 	alloc_limit = MACRO_MIN(alloc_limit, alloc_limit_max[table_idx]);
 	alloc_limit = MACRO_MAX(alloc_limit, 1U);
 
-	block_size = padding + alloc_limit * info->alloc_size;
+	block_size = padding + alloc_limit * alloc_size;
 	block_size = MACRO_NEXT_OR_EQUAL_POWER_OF_2(block_size);
 
 	handle_impl->padding = padding;
 	handle_impl->alloc_limit = alloc_limit;
-	handle_impl->alloc_size = info->alloc_size;
+	handle_impl->alloc_size = alloc_size;
 	handle_impl->block_size = block_size;
+	handle_impl->alignment = alignment;
 
 	handle_impl->alloc_fn = alloc_fns[table_idx];
 	handle_impl->free_fn = free_fns[table_idx];
@@ -1478,9 +1555,21 @@ alloc_alloc_state(
 
 	alloc_handle_t* handle = state->handles;
 
-	for(; handle_info < handle_info_end; ++handle_info, ++handle)
+	alloc_t last_alloc_size = 0;
+	alloc_t last_alignment = 0;
+
+	while(handle_info < handle_info_end)
 	{
 		alloc_create_handle(handle_info, handle);
+
+		alloc_handle_impl_t* handle_impl = (void*) handle;
+		assert_true(last_alloc_size <= handle_impl->alloc_size
+			&& last_alignment <= handle_impl->alignment);
+		last_alloc_size = handle_impl->alloc_size;
+		last_alignment = handle_impl->alignment;
+
+		++handle_info;
+		++handle;
 	}
 
 	alloc_create_handle(NULL, handle);
@@ -1498,7 +1587,8 @@ alloc_clone_state(
 	assert_not_null(source);
 
 	alloc_t handle_count = source->handle_count;
-	alloc_t total_size = sizeof(alloc_state_t) + sizeof(alloc_handle_t) * handle_count;
+	alloc_t total_size = sizeof(alloc_state_t) +
+		sizeof(alloc_handle_t) * handle_count;
 
 	alloc_state_t* state = alloc_alloc_virtual(total_size);
 	if(!state)
@@ -1506,7 +1596,7 @@ alloc_clone_state(
 		return NULL;
 	}
 
-	(void) memcpy(state, source, total_size);
+	memcpy(state, source, total_size);
 
 	alloc_handle_impl_t* handle = (void*) state->handles;
 	alloc_handle_impl_t* handle_end = handle + handle_count;
@@ -1740,6 +1830,40 @@ alloc_alloc_h(
 }
 
 
+#if ALLOC_RED_ZONE_BYTES != 0
+
+
+	private uint8_t
+	alloc_get_red_zone_byte(
+		alloc_t i
+		)
+	{
+		assert_lt(i, ALLOC_RED_ZONE_BYTES);
+
+		return (alloc_red_zone_random ^ (i * 0x9e3779b9u)) >> ((i & 3) * 8);
+	}
+
+
+	private void
+	alloc_set_red_zone(
+		uint8_t* ptr
+		)
+	{
+		assert_not_null(ptr);
+
+		uint8_t* ptr_end = ptr + ALLOC_RED_ZONE_BYTES;
+		alloc_t i = 0;
+
+		while(ptr < ptr_end)
+		{
+			*(ptr++) = alloc_get_red_zone_byte(i++);
+		}
+	}
+
+
+#endif
+
+
 _alloc_func_ void*
 alloc_alloc_uh(
 	_opaque_ alloc_handle_t* handle,
@@ -1755,9 +1879,40 @@ alloc_alloc_uh(
 	assert_not_null(handle);
 
 #ifndef ALLOC_DEBUG
+	ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+
 	alloc_handle_impl_t* handle_impl = (void*) handle;
 
-	return handle_impl->alloc_fn(handle_impl, size, zero);
+	void* ptr = handle_impl->alloc_fn(handle_impl, size, zero);
+
+	alloc_t alignment = handle_impl->alignment;
+	assert_false((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(alignment),
+		{
+			fprintf(stderr, "alloc size %lu our size %lu\n", handle_impl->alloc_size, size);
+			char format[256];
+			snprintf(format, sizeof(format), "alloc_alloc(): invalid "
+				"pointer alignment, got ptr = %s and alignment = %s\n",
+				MACRO_FORMAT_TYPE(ptr), MACRO_FORMAT_TYPE(alignment));
+			fprintf(stderr, format, ptr, size);
+		}
+		);
+
+#if ALLOC_RED_ZONE_BYTES != 0
+	if(!alloc_handle_is_virtual(handle_impl) && ptr)
+	{
+		alloc_t aligned_red_zone =
+			MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, handle_impl->alignment - 1);
+
+		alloc_set_red_zone(ptr + aligned_red_zone - ALLOC_RED_ZONE_BYTES);
+		ptr += aligned_red_zone;
+		alloc_set_red_zone(ptr + size);
+	}
+#endif
+
+	ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
+	ALLOC_VALGRIND_ALLOC(ptr, size, zero);
+
+	return ptr;
 #else
 	return zero ? calloc(1, size) : malloc(size);
 #endif
@@ -1791,12 +1946,51 @@ alloc_free_h(
 
 private _inline_ alloc_header_t*
 alloc_get_header(
-	const alloc_handle_impl_t* handle,
+	_in_ void* handle,
 	_in_ void* ptr
 	)
 {
-	return MACRO_ALIGN_DOWN((void*) ptr, handle->block_size - 1);
+	const alloc_handle_impl_t* handle_impl = (void*) handle;
+
+	return MACRO_ALIGN_DOWN((void*) ptr, handle_impl->block_size - 1);
 }
+
+
+#if ALLOC_RED_ZONE_BYTES != 0
+
+
+	private void
+	alloc_verify_red_zone(
+		_in_ uint8_t* ptr,
+		alloc_st dir
+		)
+	{
+		assert_not_null(ptr);
+
+		const uint8_t* ptr_end = ptr + ALLOC_RED_ZONE_BYTES;
+		alloc_t i = 0;
+
+		while(ptr < ptr_end)
+		{
+			uint8_t want = alloc_get_red_zone_byte(i);
+			assert_eq(*ptr, want,
+				{
+					alloc_st off = dir == -1 ? ALLOC_RED_ZONE_BYTES - i : i + 1;
+					char format[256];
+					snprintf(format, sizeof(format), "alloc_free(): red zone "
+						"corruption detected at offset %s from user pointer\n",
+						MACRO_FORMAT_TYPE(off));
+					fprintf(stderr, format, off);
+				}
+				);
+
+			++ptr;
+			++i;
+		}
+	}
+
+
+#endif
 
 
 void
@@ -1816,6 +2010,8 @@ alloc_free_uh(
 	assert_not_null(handle);
 
 #ifndef ALLOC_DEBUG
+	ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+
 	alloc_handle_impl_t* handle_impl = (void*) handle;
 	alloc_header_t* header = NULL;
 
@@ -1823,34 +2019,56 @@ alloc_free_uh(
 	{
 		header = alloc_get_header(handle_impl, ptr);
 
-		assert_eq((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(size), 0,
+		alloc_t alignment = handle_impl->alignment;
+		assert_false((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(alignment),
 			{
-				if(!MACRO_IS_POWER_OF_2(size)) break;
 				char format[256];
 				snprintf(format, sizeof(format), "alloc_free(): invalid "
-					"pointer alignment, got ptr = %s and size = %s\n",
-					MACRO_FORMAT_TYPE(ptr), MACRO_FORMAT_TYPE(size));
+					"pointer alignment, got ptr = %s and alignment = %s\n",
+					MACRO_FORMAT_TYPE(ptr), MACRO_FORMAT_TYPE(alignment));
 				fprintf(stderr, format, ptr, size);
 			}
 			);
 
-		assert_eq(header->alloc_size, handle_impl->alloc_size,
+		alloc_t slab_size = header->alloc_size;
+		alloc_t handle_size = handle_impl->alloc_size;
+		assert_eq(slab_size, handle_size,
 			{
 				char format[256];
-				snprintf(format, sizeof(format), "alloc_free(): mismatch "
-					"between passed size %s and (next or equal power of 2)"
-					" pointer size %s\n", MACRO_FORMAT_TYPE(size),
-					MACRO_FORMAT_TYPE(header->alloc_size));
-				fprintf(stderr, format, size, header->alloc_size);
+				snprintf(format, sizeof(format), "alloc_free(): invalid size %s"
+					" produces mismatched slab size %s and handle size %s\n",
+					MACRO_FORMAT_TYPE(size), MACRO_FORMAT_TYPE(slab_size),
+					MACRO_FORMAT_TYPE(handle_size));
+				fprintf(stderr, format, size, slab_size, handle_size);
 			}
 			);
+
+#if ALLOC_RED_ZONE_BYTES != 0
+		alloc_t aligned_red_zone =
+			MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, handle_impl->alignment - 1);
+
+		alloc_verify_red_zone(ptr - ALLOC_RED_ZONE_BYTES, -1);
+		alloc_verify_red_zone(ptr + size, 1);
+
+		ptr -= aligned_red_zone;
+#endif
 	}
 
 	handle_impl->free_fn(handle_impl, header, (void*) ptr, size);
 
-#ifdef ALLOC_VALGRIND
-	VALGRIND_FREELIKE_BLOCK(ptr, 0);
+	ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
+
+#if ALLOC_RED_ZONE_BYTES != 0
+	if(assert_likely(!alloc_handle_is_virtual(handle_impl)))
+	{
+		alloc_t aligned_red_zone =
+			MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, handle_impl->alignment - 1);
+
+		ptr += aligned_red_zone;
+	}
 #endif
+
+	ALLOC_VALGRIND_FREE(ptr);
 #else
 	free((void*) ptr);
 #endif
@@ -1858,6 +2076,17 @@ alloc_free_uh(
 
 
 #ifndef ALLOC_DEBUG
+	#if ALLOC_RED_ZONE_BYTES != 0
+		#define ALLOC_CHECK_RED_ZONE()	\
+		alloc_verify_red_zone(ptr + old_size, 1);
+
+		#define ALLOC_SET_NEW_RED_ZONE()	\
+		alloc_set_red_zone((void*) ptr + new_size);
+	#else
+		#define ALLOC_CHECK_RED_ZONE()
+		#define ALLOC_SET_NEW_RED_ZONE()
+	#endif
+
 	#define ALLOC_REALLOC(alloc_fn, free_fn)							\
 	do																	\
 	{																	\
@@ -1876,16 +2105,35 @@ alloc_free_uh(
 																		\
 		if(old_handle == new_handle)									\
 		{																\
-			if(alloc_handle_is_virtual((void*) old_handle))				\
+			if(assert_unlikely(alloc_handle_is_virtual(old_handle)))	\
 			{															\
-				return alloc_realloc_virtual(ptr, old_size, new_size);	\
+				void* new_ptr =											\
+					alloc_realloc_virtual(ptr, old_size, new_size);		\
+				if(assert_unlikely(!new_ptr))							\
+				{														\
+					return NULL;										\
+				}														\
+																		\
+				ALLOC_VALGRIND_FREE(ptr);								\
+				ALLOC_VALGRIND_ALLOC(new_ptr, new_size, 1);				\
+																		\
+				return new_ptr;											\
 			}															\
+																		\
+			ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();					\
+																		\
+			ALLOC_CHECK_RED_ZONE();										\
 																		\
 			if(new_size > old_size && zero)								\
 			{															\
-				(void) memset((void*) ptr								\
-					+ old_size, 0, new_size - old_size);				\
+				memset((void*) ptr + old_size, 0, new_size - old_size);	\
 			}															\
+																		\
+			ALLOC_SET_NEW_RED_ZONE();									\
+																		\
+			ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();					\
+			ALLOC_VALGRIND_FREE(ptr);									\
+			ALLOC_VALGRIND_ALLOC(ptr, new_size, zero);					\
 																		\
 			return (void*) ptr;											\
 		}																\
@@ -1896,7 +2144,7 @@ alloc_free_uh(
 			return NULL;												\
 		}																\
 																		\
-		(void) memcpy(new_ptr, ptr, MACRO_MIN(old_size, new_size));		\
+		memcpy(new_ptr, ptr, MACRO_MIN(old_size, new_size));			\
 																		\
 		free_fn(old_handle, ptr, old_size);								\
 																		\
@@ -1904,21 +2152,21 @@ alloc_free_uh(
 	}																	\
 	while(0)
 #else
-	#define ALLOC_REALLOC(alloc_fn, free_fn)							\
-	do																	\
-	{																	\
-		(void) old_handle;												\
-		(void) new_handle;												\
-																		\
-		void* new_ptr = realloc((void*) ptr, new_size);					\
-																		\
-		if(zero && new_size > old_size && new_ptr)						\
-		{																\
-			(void) memset(new_ptr + old_size, 0, new_size - old_size);	\
-		}																\
-																		\
-		return new_ptr;													\
-	}																	\
+	#define ALLOC_REALLOC(alloc_fn, free_fn)					\
+	do															\
+	{															\
+		(void) old_handle;										\
+		(void) new_handle;										\
+																\
+		void* new_ptr = realloc((void*) ptr, new_size);			\
+																\
+		if(zero && new_size > old_size && new_ptr)				\
+		{														\
+			memset(new_ptr + old_size, 0, new_size - old_size);	\
+		}														\
+																\
+		return new_ptr;											\
+	}															\
 	while(0)
 #endif
 
@@ -1951,4 +2199,12 @@ alloc_realloc_uh(
 }
 
 
+#undef ALLOC_SET_NEW_RED_ZONE
+#undef ALLOC_CHECK_RED_ZONE
 #undef ALLOC_REALLOC
+
+#undef ALLOC_VALGRIND_FREE
+#undef ALLOC_VALGRIND_ALLOC
+#undef ALLOC_VALGRIND_ENABLE_ERROR_REPORTING
+#undef ALLOC_VALGRIND_DISABLE_ERROR_REPORTING
+#undef ALLOC_VALGRIND

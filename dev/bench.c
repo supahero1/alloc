@@ -4,9 +4,9 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#define OPERATIONS 0x10000
+#define OPERATIONS 0x100000
 #define THREADS 0x10
-#define POINTERS 0x100
+#define POINTERS 0x1000
 
 
 static uint32_t r_seed;
@@ -61,7 +61,7 @@ dev_bench(
 		int r = fast_rand();
 		int Index = r % POINTERS;
 		r >>= 12;
-		int Size = 1 + (r & 0xFFFF);
+		int Size = 1 + (r & 0xFFF);
 		r >>= 16;
 		int Bool = r & 1;
 
@@ -133,6 +133,14 @@ main(
 	}
 
 	fprintf(stderr, "Time: %.02lfms\n", (double)(End - Start) / 1000000.0);
+
+	for(int i = 0; i < POINTERS; i++)
+	{
+		if(Ptrs[i].Ptr)
+		{
+			dev_free(Ptrs[i].Ptr, Ptrs[i].Size);
+		}
+	}
 
 	return 0;
 }
