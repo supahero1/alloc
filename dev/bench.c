@@ -4,28 +4,17 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#define OPERATIONS 0x100000
-#define THREADS 0x10
-#define POINTERS 0x1000
+#define OPERATIONS 0x10000
+#define THREADS 0x100
+#define POINTERS 0x100
 
-
-static uint32_t r_seed;
-
-static void
-fast_srand(
-	const uint32_t seed
-	)
-{
-	r_seed = seed;
-}
 
 static uint32_t
 fast_rand(
-	void
+	uint32_t* seed
 	)
 {
-	r_seed = (1103515245 * r_seed + 12345) & 0x7FFFFFFF;
-	return r_seed;
+	return *seed = (1103515245 * *seed + 12345) & 0x7FFFFFFF;
 }
 
 
@@ -54,14 +43,14 @@ dev_bench(
 	void* Arg
 	)
 {
-	(void) Arg;
+	uint32_t srand = time(NULL) ^ (uintptr_t) Arg;
 
 	for(int i = 0; i < OPERATIONS; i++)
 	{
-		int r = fast_rand();
+		int r = fast_rand(&srand);
 		int Index = r % POINTERS;
 		r >>= 12;
-		int Size = 1 + (r & 0xFFF);
+		int Size = 1 + (r & 0xFFFF);
 		r >>= 16;
 		int Bool = r & 1;
 
@@ -72,7 +61,8 @@ dev_bench(
 			if(Bool)
 			{
 				Ptrs[Index].Ptr = dev_realloc(Ptrs[Index].Ptr, Ptrs[Index].Size, Size, 0);
-				*(uint8_t*) Ptrs[Index].Ptr = 0;
+				assert_not_null(Ptrs[Index].Ptr);
+
 				Ptrs[Index].Size = Size;
 			}
 			else
@@ -85,6 +75,11 @@ dev_bench(
 		{
 			Ptrs[Index].Size = Size;
 			Ptrs[Index].Ptr = dev_alloc(Ptrs[Index].Size, 0);
+			assert_not_null(Ptrs[Index].Ptr);
+		}
+
+		if(Ptrs[Index].Ptr)
+		{
 			*(uint8_t*) Ptrs[Index].Ptr = 0;
 		}
 
@@ -100,8 +95,6 @@ main(
 	void
 	)
 {
-	fast_srand(time(NULL));
-
 	for(int i = 0; i < POINTERS; i++)
 	{
 		pthread_mutex_init(&Ptrs[i].Mutex, NULL);
@@ -116,7 +109,7 @@ main(
 
 	for(int i = 0; i < THREADS; i++)
 	{
-		pthread_create(&Threads[i], NULL, dev_bench, NULL);
+		pthread_create(&Threads[i], NULL, dev_bench, (void*)(uintptr_t) i);
 	}
 
 	for(int i = 0; i < THREADS; i++)

@@ -16,45 +16,55 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* PASSING ZEROES IS UNDEFINED BEHAVIOR */
 
 #define MACRO_POWER_OF_2(bit) (1U << (bit))
 
-#define MACRO_LOG2(num)					\
-({										\
-	typeof(num) _num = (num);			\
-										\
-	if(num <= 1)						\
-	{									\
-		_num = 0;						\
-	}									\
-	else								\
-	{									\
-		_num = __builtin_ctzll(num);	\
-	}									\
-										\
-	_num;								\
+#define MACRO_FLOOR_LOG2(num)				\
+({											\
+	typeof(num) _num = (num);				\
+											\
+	if(num)									\
+	{										\
+		_num = 63 - __builtin_clzll(_num);	\
+	}										\
+											\
+	_num;									\
 })
 
-#define MACRO_LOG2_CONST(num)	\
-__builtin_choose_expr((num) <= 1, 0, __builtin_ctzll(num))
+#define MACRO_FLOOR_LOG2_CONST(num)	\
+__builtin_choose_expr(num, 63 - __builtin_clzll(num), 0)
 
-#define MACRO_NEXT_OR_EQUAL_POWER_OF_2(num)				\
-({														\
-	typeof(num) _num = (num);							\
-														\
-	if(_num > 2)										\
-	{													\
-		_num = 1U << (32 - __builtin_clz(_num - 1));	\
-	}													\
-														\
-	_num;												\
+#define MACRO_CEIL_LOG2(num)				\
+({											\
+	typeof(num) _num = (num);				\
+	--_num;									\
+											\
+	if(_num)								\
+	{										\
+		_num = 64 - __builtin_clzll(_num);	\
+	}										\
+											\
+	_num;									\
+})
+
+#define MACRO_CEIL_LOG2_CONST(num)	\
+__builtin_choose_expr((num) <= 1, 0, 64 - __builtin_clzll((num) - 1))
+
+#define MACRO_NEXT_OR_EQUAL_POWER_OF_2(num)						\
+({																\
+	typeof(num) _num = (num);									\
+																\
+	if(_num > 2)												\
+	{															\
+		_num = UINT64_C(1) << (64 - __builtin_clzll(_num - 1));	\
+	}															\
+																\
+	_num;														\
 })
 
 #define MACRO_NEXT_OR_EQUAL_POWER_OF_2_CONST(num)	\
-__builtin_choose_expr((num) <= 2, (num), 1U << (32 - __builtin_clz((num) - 1)))
+__builtin_choose_expr((num) > 2, UINT64_C(1) << (64 - __builtin_clzll((num) - 1)), num)
 
 #define MACRO_POWER_OF_2_MASK(num)	\
 (MACRO_NEXT_OR_EQUAL_POWER_OF_2(num) - 1)
@@ -64,28 +74,12 @@ __builtin_choose_expr((num) <= 2, (num), 1U << (32 - __builtin_clz((num) - 1)))
 
 #define MACRO_IS_POWER_OF_2(x)	\
 ({								\
-	typeof(x) _x = (x);	\
+	typeof(x) _x = (x);			\
 	(_x & (_x - 1)) == 0;		\
 })
 
-#define MACRO_GET_BITS(num)						\
-({												\
-	typeof(num) _num = (num);					\
-												\
-	if(_num <= 1)								\
-	{											\
-		_num = 0;								\
-	}											\
-	else										\
-	{											\
-		_num = 32 - __builtin_clz(_num - 1);	\
-	}											\
-												\
-	_num;										\
-})
-
-#define MACRO_GET_BITS_CONST(num)	\
-__builtin_choose_expr((num) <= 1, 0, 32 - __builtin_clz((num) - 1))
+#define MACRO_GET_BITS(num) MACRO_CEIL_LOG2(num)
+#define MACRO_GET_BITS_CONST(num) MACRO_CEIL_LOG2_CONST(num)
 
 #define MACRO_ALIGN_UP(num, mask)				\
 ({												\
@@ -197,7 +191,3 @@ MACRO_FORMAT_TYPE((x) 0)
 
 #define MACRO_CONTAINER_OF(ptr, type, member)	\
 ((type*)((char*)(ptr) - offsetof(type, member)))
-
-#ifdef __cplusplus
-}
-#endif

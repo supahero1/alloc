@@ -1,15 +1,15 @@
 .EXPORT_ALL_VARIABLES:
 
-CFLAGS := -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE
+CFLAGS := -O3 -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE
 
 ifeq ($(M32), 1)
 CFLAGS += -m32
 endif
 
 ifeq ($(RELEASE), 1)
-CFLAGS += -O3 -DNDEBUG
+CFLAGS += -DNDEBUG
 else
-CFLAGS += -O0 -g3 -ggdb
+CFLAGS += -g3 -ggdb
 endif
 
 ifeq ($(OS), Windows_NT)

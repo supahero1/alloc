@@ -87,6 +87,7 @@ typedef enum alloc_handle_flag : alloc_t
 	ALLOC_HANDLE_FLAG_NONE					= 0,
 	ALLOC_HANDLE_FLAG_IMMEDIATE_FREE		= 1 << 0,
 	ALLOC_HANDLE_FLAG_DO_NOT_FREE			= 1 << 1,
+	ALLOC_HANDLE_FLAG_GLOBAL				= 1 << 2,
 	MACRO_ENUM_BITS(ALLOC_HANDLE_FLAG)
 }
 alloc_handle_flag_t;
@@ -94,7 +95,7 @@ alloc_handle_flag_t;
 
 typedef struct alloc_handle
 {
-	alloc_t _[10 + 22];
+	alloc_t _[13 + 11];
 }
 alloc_handle_t;
 
@@ -141,6 +142,12 @@ alloc_get_global_state(
 
 extern _const_func_ alloc_t
 alloc_get_page_size(
+	void
+	);
+
+
+extern _const_func_ alloc_t
+alloc_get_huge_page_size(
 	void
 	);
 

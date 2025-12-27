@@ -15,7 +15,7 @@
  */
 
 #ifndef ALLOC_DEFAULT_BLOCK_SIZE
-	#define ALLOC_DEFAULT_BLOCK_SIZE MACRO_POWER_OF_2(20)
+	#define ALLOC_DEFAULT_BLOCK_SIZE MACRO_POWER_OF_2(21)
 #endif
 
 #ifndef ALLOC_RED_ZONE_BYTES
@@ -82,6 +82,15 @@
 	}
 
 
+	private alloc_t
+	alloc_read_huge_page_size(
+		void
+		)
+	{
+		return GetLargePageMinimum();
+	}
+
+
 	#if ALLOC_RED_ZONE_BYTES != 0
 
 
@@ -97,6 +106,29 @@
 
 
 	#endif
+
+
+	private DWORD alloc_fls_index;
+
+
+	private void NTAPI
+	alloc_destructor_wrapper(
+		void* arg
+		)
+	{
+		void (*cleanup)(void) = arg;
+		cleanup();
+	}
+
+
+	private void
+	alloc_register_thread_local_cleanup(
+		void (*cleanup)(void)
+		)
+	{
+		alloc_fls_index = FlsAlloc(alloc_destructor_wrapper);
+		FlsSetValue(alloc_fls_index, cleanup);
+	}
 
 
 	_alloc_func_ void*
@@ -140,8 +172,8 @@
 		)
 	{
 		assert_not_null(ptr);
-		assert_ge(alignment, 1);
-		assert_eq(MACRO_IS_POWER_OF_2(alignment), 1);
+		assert_neq(alignment, 0);
+		assert_true(MACRO_IS_POWER_OF_2(alignment));
 
 		if(!size)
 		{
@@ -244,6 +276,39 @@
 	}
 
 
+	private alloc_t
+	alloc_read_huge_page_size(
+		void
+		)
+	{
+		FILE* f = fopen("/proc/meminfo", "r");
+		if(!f)
+		{
+			return 0;
+		}
+
+		alloc_t huge_page_size = 0;
+		char line[256];
+		char format[32];
+		snprintf(format, sizeof(format), "Hugepagesize: %s kB",
+			MACRO_FORMAT_TYPE_CONST(alloc_t));
+
+		while(fgets(line, sizeof(line), f))
+		{
+			alloc_t size_kb;
+			if(sscanf(line, format, &size_kb) == 1)
+			{
+				huge_page_size = size_kb * 1024;
+				break;
+			}
+		}
+
+		fclose(f);
+
+		return huge_page_size;
+	}
+
+
 	#if ALLOC_RED_ZONE_BYTES != 0
 		#include <sys/time.h>
 
@@ -262,6 +327,29 @@
 	#endif
 
 
+	private pthread_key_t alloc_thread_key;
+
+
+	private void
+	alloc_destructor_wrapper(
+		void* arg
+		)
+	{
+		void (*cleanup)(void) = arg;
+		cleanup();
+	}
+
+
+	private void
+	alloc_register_thread_local_cleanup(
+		void (*cleanup)(void)
+		)
+	{
+		pthread_key_create(&alloc_thread_key, alloc_destructor_wrapper);
+		pthread_setspecific(alloc_thread_key, cleanup);
+	}
+
+
 	_alloc_func_ void*
 	alloc_alloc_virtual(
 		alloc_t size
@@ -277,6 +365,12 @@
 		if(ptr == MAP_FAILED)
 		{
 			return NULL;
+		}
+
+		alloc_t huge_size = alloc_get_huge_page_size();
+		if(huge_size && size >= huge_size && !(size & (huge_size - 1)))
+		{
+			madvise(ptr, size, MADV_HUGEPAGE);
 		}
 
 		return ptr;
@@ -307,8 +401,8 @@
 		)
 	{
 		assert_not_null(ptr);
-		assert_ge(alignment, 1);
-		assert_eq(MACRO_IS_POWER_OF_2(alignment), 1);
+		assert_neq(alignment, 0);
+		assert_true(MACRO_IS_POWER_OF_2(alignment));
 
 		if(!size)
 		{
@@ -320,7 +414,7 @@
 		alloc_t actual_size = size + mask;
 
 		void* real_ptr = mmap(NULL, actual_size, PROT_NONE,
-			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 		if(real_ptr == MAP_FAILED)
 		{
 			return NULL;
@@ -328,10 +422,21 @@
 
 		void* aligned_ptr = MACRO_ALIGN_UP(real_ptr, mask);
 
-		if(mprotect(aligned_ptr, size, PROT_READ | PROT_WRITE))
+		void* committed_ptr = mmap(aligned_ptr, size, PROT_READ | PROT_WRITE,
+			MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+		if(committed_ptr == MAP_FAILED)
 		{
 			alloc_free_virtual(real_ptr, actual_size);
 			return NULL;
+		}
+
+		alloc_t huge_size = alloc_get_huge_page_size();
+		alloc_t huge_mask = huge_size - 1;
+
+		if(huge_size && size >= huge_size &&
+			!(size & huge_mask) && !((uintptr_t) aligned_ptr & huge_mask))
+		{
+			madvise(aligned_ptr, size, MADV_HUGEPAGE);
 		}
 
 		*ptr = aligned_ptr;
@@ -389,8 +494,8 @@ alloc_realloc_virtual_aligned(
 	)
 {
 	assert_not_null(new_ptr);
-	assert_ge(alignment, 1);
-	assert_eq(MACRO_IS_POWER_OF_2(alignment), 1);
+	assert_neq(alignment, 0);
+	assert_true(MACRO_IS_POWER_OF_2(alignment));
 
 	if(!new_size)
 	{
@@ -430,6 +535,7 @@ typedef struct _packed_ alloc_header
 {
 	void* prev;
 	void* next;
+	void* handle;
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 }
@@ -456,6 +562,7 @@ struct _packed_ alloc_1_block
 {
 	alloc_1_block_t* prev;
 	alloc_1_block_t* next;
+	void* handle;
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 	uint8_t count;
@@ -471,6 +578,7 @@ struct _packed_ alloc_2
 {
 	alloc_2_t* prev;
 	alloc_2_t* next;
+	void* handle;
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 	uint16_t used;
@@ -487,6 +595,7 @@ struct _packed_ alloc_4
 {
 	alloc_4_t* prev;
 	alloc_4_t* next;
+	void* handle;
 	uint32_t real_ptr_off;
 	uint32_t alloc_size;
 	uint32_t used;
@@ -676,6 +785,8 @@ private alloc_state_info_t alloc_default_state_info =
 private alloc_t alloc_page_size;
 private alloc_t alloc_page_size_mask;
 private uint32_t alloc_page_size_shift;
+private alloc_t alloc_huge_page_size;
+private alloc_t alloc_huge_page_size_mask;
 private const alloc_state_t* alloc_global_state;
 
 
@@ -691,6 +802,16 @@ private const alloc_state_t* alloc_global_state;
 
 
 
+private void
+alloc_library_cleanup(
+	void
+	)
+{
+	alloc_free_state(alloc_global_state);
+	alloc_global_state = NULL;
+}
+
+
 private assert_ctor void
 alloc_library_init(
 	void
@@ -702,21 +823,16 @@ alloc_library_init(
 	assert_true(MACRO_IS_POWER_OF_2(alloc_page_size));
 
 	alloc_page_size_mask = alloc_page_size - 1;
-	alloc_page_size_shift = MACRO_LOG2(alloc_page_size);
+	alloc_page_size_shift = MACRO_FLOOR_LOG2(alloc_page_size);
+
+	alloc_huge_page_size = alloc_read_huge_page_size();
+	alloc_huge_page_size_mask = alloc_huge_page_size - 1;
 
 #if ALLOC_RED_ZONE_BYTES != 0
 	alloc_red_zone_random = alloc_get_scrambled_time();
 #endif
-}
 
-
-private assert_dtor void
-alloc_library_free(
-	void
-	)
-{
-	alloc_free_state(alloc_global_state);
-	alloc_global_state = NULL;
+	//alloc_register_thread_local_cleanup(alloc_library_cleanup);
 }
 
 
@@ -741,6 +857,15 @@ alloc_get_page_size(
 	)
 {
 	return alloc_page_size;
+}
+
+
+_const_func_ alloc_t
+alloc_get_huge_page_size(
+	void
+	)
+{
+	return alloc_huge_page_size;
 }
 
 
@@ -784,8 +909,11 @@ alloc_alloc_1_fn(
 			return NULL;
 		}
 
+		ALLOC_VALGRIND_ALLOC(block, sizeof(alloc_1_block_t), 1);
+
 		assert_lt((void*) block - real_ptr, UINT32_MAX);
 
+		block->handle = handle;
 		block->real_ptr_off = (void*) block - real_ptr;
 		block->alloc_size = 1;
 
@@ -836,6 +964,8 @@ alloc_alloc_1_fn(
 
 	if(alloc->free != UINT8_MAX)
 	{
+		assert_lt(alloc->free, capacity);
+
 		uint8_t* ptr = alloc->data + alloc->free;
 
 		alloc->free = *ptr;
@@ -906,6 +1036,8 @@ alloc_free_1_fn(
 		alloc_free_virtual_aligned((void*) block - block->real_ptr_off,
 			handle->block_size, handle->block_size);
 
+		ALLOC_VALGRIND_FREE(block);
+
 		--handle->allocators;
 	}
 	else
@@ -954,8 +1086,11 @@ alloc_alloc_2_fn(
 			return NULL;
 		}
 
+		ALLOC_VALGRIND_ALLOC(alloc, sizeof(alloc_2_t), 1);
+
 		assert_lt((void*) alloc - real_ptr, UINT32_MAX);
 
+		alloc->handle = handle;
 		alloc->real_ptr_off = (void*) alloc - real_ptr;
 		alloc->alloc_size = handle->alloc_size;
 
@@ -984,6 +1119,8 @@ alloc_alloc_2_fn(
 
 	if(alloc->free != ALLOC_2_MAX)
 	{
+		assert_lt(alloc->free, handle->alloc_limit);
+
 		void* ptr = data + alloc->free * handle->alloc_size;
 
 		memcpy(&alloc->free, ptr, 2);
@@ -1045,6 +1182,8 @@ alloc_free_2_fn(
 		alloc_free_virtual_aligned((void*) alloc - alloc->real_ptr_off,
 			handle->block_size, handle->block_size);
 
+		ALLOC_VALGRIND_FREE(alloc);
+
 		--handle->allocators;
 	}
 	else
@@ -1089,8 +1228,11 @@ alloc_alloc_4_fn(
 			return NULL;
 		}
 
+		ALLOC_VALGRIND_ALLOC(alloc, sizeof(alloc_4_t), 1);
+
 		assert_lt((void*) alloc - real_ptr, UINT32_MAX);
 
+		alloc->handle = handle;
 		alloc->real_ptr_off = (void*) alloc - real_ptr;
 		alloc->alloc_size = handle->alloc_size;
 
@@ -1182,6 +1324,8 @@ alloc_free_4_fn(
 		alloc_free_virtual_aligned((void*) alloc - alloc->real_ptr_off,
 			handle->block_size, handle->block_size);
 
+		ALLOC_VALGRIND_FREE(alloc);
+
 		--handle->allocators;
 	}
 	else
@@ -1250,27 +1394,21 @@ alloc_handle_is_virtual(
 }
 
 
-#if ALLOC_RED_ZONE_BYTES != 0
-
-
-	private _const_func_ alloc_t
-	alloc_gcd(
-		alloc_t a,
-		alloc_t b
-		)
+private _const_func_ alloc_t
+alloc_gcd(
+	alloc_t a,
+	alloc_t b
+	)
+{
+	while(b != 0)
 	{
-		while(b != 0)
-		{
-			alloc_t temp = b;
-			b = a % b;
-			a = temp;
-		}
-
-		return a;
+		alloc_t temp = b;
+		b = a % b;
+		a = temp;
 	}
 
-
-#endif
+	return a;
+}
 
 
 void
@@ -1365,17 +1503,15 @@ alloc_create_handle(
 
 	alloc_t alloc_size = info->alloc_size;
 	alloc_t alignment = MACRO_MIN(info->alignment, alloc_page_size);
+	alignment = alloc_gcd(alignment, info->alloc_size);
+	assert_neq(alignment, 0);
+	assert_true(MACRO_IS_POWER_OF_2(alignment));
 
 #if ALLOC_RED_ZONE_BYTES != 0
 	alloc_t aligned_red_zone =
 		MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, alignment - 1);
 	alloc_size += aligned_red_zone + ALLOC_RED_ZONE_BYTES;
-
-	alloc_t subsequent_alignment = alloc_gcd(alignment, info->alloc_size);
-	assert_neq(subsequent_alignment, 0);
-	assert_true(MACRO_IS_POWER_OF_2(subsequent_alignment));
-
-	alloc_size = MACRO_ALIGN_UP(alloc_size, subsequent_alignment - 1);
+	alloc_size = MACRO_ALIGN_UP(alloc_size, alignment - 1);
 #endif
 
 	alloc_t table_idx = MACRO_MIN(alloc_size, 4U);
@@ -1515,7 +1651,7 @@ alloc_default_idx_fn(
 	alloc_t size
 	)
 {
-	return MACRO_LOG2(MACRO_NEXT_OR_EQUAL_POWER_OF_2(size));
+	return MACRO_CEIL_LOG2(size);
 }
 
 
@@ -1531,12 +1667,16 @@ alloc_alloc_state(
 
 
 	alloc_t handle_count = info->handle_count + 1;
-	alloc_state_t* state = alloc_alloc_virtual(
-		sizeof(alloc_state_t) + sizeof(alloc_handle_t) * handle_count);
+	alloc_t total_size = sizeof(alloc_state_t) +
+		sizeof(alloc_handle_t) * handle_count;
+
+	alloc_state_t* state = alloc_alloc_virtual(total_size);
 	if(!state)
 	{
 		return NULL;
 	}
+
+	ALLOC_VALGRIND_ALLOC(state, total_size, 1);
 
 	if(!info->idx_fn)
 	{
@@ -1568,11 +1708,17 @@ alloc_alloc_state(
 		last_alloc_size = handle_impl->alloc_size;
 		last_alignment = handle_impl->alignment;
 
+		handle_impl->flags |= ALLOC_HANDLE_FLAG_GLOBAL;
+
 		++handle_info;
 		++handle;
 	}
 
+
 	alloc_create_handle(NULL, handle);
+
+	alloc_handle_impl_t* handle_impl = (void*) handle;
+	handle_impl->flags |= ALLOC_HANDLE_FLAG_GLOBAL;
 
 
 	return state;
@@ -1595,6 +1741,8 @@ alloc_clone_state(
 	{
 		return NULL;
 	}
+
+	ALLOC_VALGRIND_ALLOC(state, total_size, 1);
 
 	memcpy(state, source, total_size);
 
@@ -1630,16 +1778,26 @@ alloc_free_state(
 	}
 
 
-	alloc_t i = 0;
-	alloc_t handle_count = state->handle_count;
+	const alloc_handle_t* handle = state->handles;
+	const alloc_handle_t* handle_end = handle + state->handle_count;
 
-	for(; i < handle_count; ++i)
+	while(handle < handle_end)
 	{
-		alloc_free_handle(&state->handles[i]);
+		alloc_free_handle(handle++);
 	}
 
-	alloc_free_virtual(state, sizeof(alloc_state_t) +
-		handle_count * sizeof(alloc_handle_impl_t));
+	alloc_t total_size = sizeof(alloc_state_t) +
+		sizeof(alloc_handle_t) * state->handle_count;
+
+	alloc_free_virtual(state, total_size);
+
+	ALLOC_VALGRIND_FREE(state);
+
+
+	if(state == alloc_global_state)
+	{
+		alloc_global_state = NULL;
+	}
 }
 
 
@@ -1806,30 +1964,6 @@ alloc_handle_get_flags_uh(
 }
 
 
-_alloc_func_ void*
-alloc_alloc_h(
-	_opaque_ alloc_handle_t* handle,
-	alloc_t size,
-	int zero
-	)
-{
-	if(assert_unlikely(!size))
-	{
-		return NULL;
-	}
-
-	assert_not_null(handle);
-
-	void* ptr;
-
-	alloc_handle_lock_h(handle);
-		ptr = alloc_alloc_uh(handle, size, zero);
-	alloc_handle_unlock_h(handle);
-
-	return ptr;
-}
-
-
 #if ALLOC_RED_ZONE_BYTES != 0
 
 
@@ -1864,11 +1998,12 @@ alloc_alloc_h(
 #endif
 
 
-_alloc_func_ void*
-alloc_alloc_uh(
+private _alloc_func_ void*
+alloc_alloc_common(
 	_opaque_ alloc_handle_t* handle,
 	alloc_t size,
-	int zero
+	int zero,
+	int locked
 	)
 {
 	if(assert_unlikely(!size))
@@ -1883,7 +2018,17 @@ alloc_alloc_uh(
 
 	alloc_handle_impl_t* handle_impl = (void*) handle;
 
+	if(assert_likely(locked))
+	{
+		alloc_handle_lock_h(handle);
+	}
+
 	void* ptr = handle_impl->alloc_fn(handle_impl, size, zero);
+
+	if(assert_likely(locked))
+	{
+		alloc_handle_unlock_h(handle);
+	}
 
 	alloc_t alignment = handle_impl->alignment;
 	assert_false((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(alignment),
@@ -1914,33 +2059,33 @@ alloc_alloc_uh(
 
 	return ptr;
 #else
+	(void) handle;
+	(void) locked;
+
 	return zero ? calloc(1, size) : malloc(size);
 #endif
 }
 
 
-#undef ALLOC_FREE
-
-
-void
-alloc_free_h(
+_alloc_func_ void*
+alloc_alloc_h(
 	_opaque_ alloc_handle_t* handle,
-	_opaque_ void* ptr,
-	alloc_t size
+	alloc_t size,
+	int zero
 	)
 {
-	assert_ptr(ptr, size);
+	return alloc_alloc_common(handle, size, zero, 1);
+}
 
-	if(assert_unlikely(!ptr))
-	{
-		return;
-	}
 
-	assert_not_null(handle);
-
-	alloc_handle_lock_h(handle);
-		alloc_free_uh(handle, ptr, size);
-	alloc_handle_unlock_h(handle);
+_alloc_func_ void*
+alloc_alloc_uh(
+	_opaque_ alloc_handle_t* handle,
+	alloc_t size,
+	int zero
+	)
+{
+	return alloc_alloc_common(handle, size, zero, 0);
 }
 
 
@@ -1993,11 +2138,12 @@ alloc_get_header(
 #endif
 
 
-void
-alloc_free_uh(
+private void
+alloc_free_common(
 	_opaque_ alloc_handle_t* handle,
 	_opaque_ void* ptr,
-	alloc_t size
+	alloc_t size,
+	int locked
 	)
 {
 	assert_ptr(ptr, size);
@@ -2015,9 +2161,13 @@ alloc_free_uh(
 	alloc_handle_impl_t* handle_impl = (void*) handle;
 	alloc_header_t* header = NULL;
 
-	if(assert_likely(!alloc_handle_is_virtual(handle_impl)))
+	bool is_virtual = alloc_handle_is_virtual(handle_impl);
+	if(assert_likely(!is_virtual))
 	{
 		header = alloc_get_header(handle_impl, ptr);
+
+		handle = header->handle;
+		handle_impl = (void*) handle;
 
 		alloc_t alignment = handle_impl->alignment;
 		assert_false((uintptr_t) ptr & MACRO_POWER_OF_2_MASK(alignment),
@@ -2054,17 +2204,24 @@ alloc_free_uh(
 #endif
 	}
 
+	if(assert_likely(locked))
+	{
+		alloc_handle_lock_h(handle);
+	}
+
 	handle_impl->free_fn(handle_impl, header, (void*) ptr, size);
+
+	if(assert_likely(locked))
+	{
+		alloc_handle_unlock_h(handle);
+	}
 
 	ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 
-#if ALLOC_RED_ZONE_BYTES != 0
-	if(assert_likely(!alloc_handle_is_virtual(handle_impl)))
+#if ALLOC_RED_ZONE_BYTES != 0 && defined(ALLOC_VALGRIND)
+	if(assert_likely(!is_virtual))
 	{
-		alloc_t aligned_red_zone =
-			MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, handle_impl->alignment - 1);
-
-		ptr += aligned_red_zone;
+		ptr += MACRO_ALIGN_UP(ALLOC_RED_ZONE_BYTES, handle_impl->alignment - 1);
 	}
 #endif
 
@@ -2072,6 +2229,28 @@ alloc_free_uh(
 #else
 	free((void*) ptr);
 #endif
+}
+
+
+void
+alloc_free_h(
+	_opaque_ alloc_handle_t* handle,
+	_opaque_ void* ptr,
+	alloc_t size
+	)
+{
+	alloc_free_common(handle, ptr, size, 1);
+}
+
+
+void
+alloc_free_uh(
+	_opaque_ alloc_handle_t* handle,
+	_opaque_ void* ptr,
+	alloc_t size
+	)
+{
+	alloc_free_common(handle, ptr, size, 0);
 }
 
 
@@ -2144,7 +2323,11 @@ alloc_free_uh(
 			return NULL;												\
 		}																\
 																		\
+		ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();						\
+																		\
 		memcpy(new_ptr, ptr, MACRO_MIN(old_size, new_size));			\
+																		\
+		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();						\
 																		\
 		free_fn(old_handle, ptr, old_size);								\
 																		\
