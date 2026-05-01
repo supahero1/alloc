@@ -1,0 +1,844 @@
+#!/usr/bin/env python3
+
+import argparse
+import datetime
+import os
+import random
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, IO, List, Optional, Set, Tuple
+
+def resolve_path(path_str: str) -> Path:
+	try:
+		return Path(path_str).resolve()
+	except Exception:
+		return Path(path_str).absolute()
+
+def find_repo_root() -> Path:
+	candidate: Path = Path(__file__).resolve().parent.parent
+	if (candidate / "Makefile").is_file() and (candidate / "dev").is_dir():
+		return candidate
+	candidate = Path.cwd()
+	for p in [candidate] + list(candidate.parents):
+		if (p / "Makefile").is_file() and (p / "dev").is_dir():
+			return p
+	sys.exit("not in alloc repository root context")
+
+ROOT_DIR: Path = find_repo_root()
+sys.path.insert(0, str(ROOT_DIR / "dev"))
+import report
+
+RUNS_DIR: Path = ROOT_DIR / "dev" / "bench_runs"
+COMPARE_DIR: Path = RUNS_DIR / "comparisons"
+BIN_DIR: Path = ROOT_DIR / "bin"
+REPORT_SCRIPT: Path = ROOT_DIR / "dev" / "report.py"
+DEFAULT_TXT: Path = BIN_DIR / "log_detailed.txt"
+DEFAULT_HTML: Path = BIN_DIR / "log_detailed.html"
+BENCH_LOG_TAG: str = "[bench]"
+BENCH_BINARY_NAMES: List[str] = ["rss", "reclaim", "frag", "ops", "first", "handoff", "app_mt", "app_st", "locality"]
+
+_PERF_EVENTS: Optional[str] = None
+_SYSCALLS_AVAILABLE: bool = False
+_STATUS_LAST_LEN: int = 0
+_BENCH_LOG_DEDUPE: Set[str] = set()
+_TAG_PLAIN: str = "[alloc]"
+_TAG_STYLED: str = "\033[1;36m[alloc]\033[0m"
+
+def status_line(text: str) -> None:
+	global _STATUS_LAST_LEN
+	if sys.stderr.isatty():
+		msg: str = f"{_TAG_STYLED} {text}"
+		visible_msg: str = f"{_TAG_PLAIN} {text}"
+		pad: str = ""
+		if _STATUS_LAST_LEN > len(visible_msg):
+			pad = " " * (_STATUS_LAST_LEN - len(visible_msg))
+		print("\r" + msg + pad, end="", file=sys.stderr, flush=True)
+		_STATUS_LAST_LEN = len(visible_msg)
+	else:
+		msg: str = f"{_TAG_PLAIN} {text}"
+		print(msg, file=sys.stderr)
+
+def status_detach() -> None:
+	global _STATUS_LAST_LEN
+	if sys.stderr.isatty() and _STATUS_LAST_LEN:
+		print(file=sys.stderr, flush=True)
+	_STATUS_LAST_LEN = 0
+
+def status_done() -> None:
+	status_detach()
+
+def status_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+	status_detach()
+	return subprocess.run(*args, **kwargs)
+
+def init_perf_events() -> Tuple[str, bool]:
+	global _PERF_EVENTS, _SYSCALLS_AVAILABLE
+	if _PERF_EVENTS is not None:
+		return _PERF_EVENTS, _SYSCALLS_AVAILABLE
+	_PERF_EVENTS = "task-clock,page-faults"
+	for ev in ["raw_syscalls:sys_enter", "syscalls:sys_enter_mmap", "syscalls:sys_enter_openat"]:
+		res: subprocess.CompletedProcess = subprocess.run(["perf", "stat", "-x,", "-e", ev, "--", "/bin/true"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+		if res.returncode == 0:
+			_PERF_EVENTS = f"{ev},{_PERF_EVENTS}"
+			_SYSCALLS_AVAILABLE = True
+			break
+	return _PERF_EVENTS, _SYSCALLS_AVAILABLE
+
+def maybe_open_html(path: Path, should_open: bool) -> None:
+	print(f"open: file://{path.resolve()}")
+	if should_open:
+		opener: str = "open" if sys.platform == "darwin" else "xdg-open"
+		if shutil.which(opener):
+			subprocess.run([opener, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def sanitize_label(label: Optional[str]) -> str:
+	if not label:
+		return "run"
+	sanitized: str = "".join(c if c.isalnum() or c in "._-" else "_" for c in label).strip("_")
+	return sanitized if sanitized else "run"
+
+def ensure_runs_dir() -> None:
+	RUNS_DIR.mkdir(parents=True, exist_ok=True)
+	COMPARE_DIR.mkdir(parents=True, exist_ok=True)
+
+def ensure_bench_bins() -> None:
+	missing: List[Path] = []
+	for prefix in ["bench_detailed_other", "bench_detailed_alloc"]:
+		for name in BENCH_BINARY_NAMES:
+			path: Path = BIN_DIR / f"{prefix}_{name}"
+			if not path.is_file():
+				missing.append(path)
+
+	if missing:
+		status_line("building: bench binaries")
+		subprocess.run(["make", "-C", str(ROOT_DIR), "build_dev_bench"], check=False, stdout=subprocess.DEVNULL)
+
+	missing = []
+	for prefix in ["bench_detailed_other", "bench_detailed_alloc"]:
+		for name in BENCH_BINARY_NAMES:
+			path = BIN_DIR / f"{prefix}_{name}"
+			if not path.is_file():
+				missing.append(path)
+
+	if missing:
+		status_done()
+		sys.exit(f"missing bench binaries in {BIN_DIR}: {', '.join(p.name for p in missing[:4])}")
+
+def ensure_report_script() -> None:
+	if not REPORT_SCRIPT.is_file():
+		status_done()
+		sys.exit(f"missing {REPORT_SCRIPT}")
+
+def list_run_names() -> List[str]:
+	if not RUNS_DIR.is_dir():
+		return []
+	dirs: List[str] = [d.name for d in RUNS_DIR.iterdir() if d.is_dir() and d.name != "comparisons"]
+	return sorted(dirs, reverse=True)
+
+def list_comparison_bases() -> List[str]:
+	if not COMPARE_DIR.is_dir():
+		return []
+	files: Set[str] = {f.stem for f in COMPARE_DIR.iterdir() if f.is_file() and f.suffix in (".txt", ".html")}
+	return sorted(list(files), reverse=True)
+
+def resolve_run_token(token: Optional[str]) -> Optional[str]:
+	if not token:
+		return None
+	names: List[str] = list_run_names()
+	if not names:
+		return None
+	if token.isdigit():
+		idx: int = int(token)
+		if 1 <= idx <= len(names):
+			return names[idx - 1]
+		return None
+	if token in names:
+		return token
+	return None
+
+def resolve_run_token_or_exit(token: Optional[str]) -> str:
+	name: Optional[str] = resolve_run_token(token)
+	if not name:
+		print(f"run not found: {token}", file=sys.stderr)
+		cmd_bench_list()
+		sys.exit(2)
+	return name
+
+def default_sections() -> List[str]:
+	ops_sizes_small: List[str] = ["8b", "16b", "64b", "256b", "1kib", "4kib", "64kib"]
+	ops_sizes_with_large: List[str] = ops_sizes_small + ["128kib", "256kib", "512kib", "1mib"]
+	ops_kinds_with_large: List[str] = ["malloc", "free", "malloc_hot", "free_hot"]
+	ops_kinds_small: List[str] = ["calloc", "calloc_hot", "pair", "realloc_small", "realloc_grow_end", "realloc_grow_middle", "realloc_shrink", "realloc_class_jump"]
+
+	sections: List[str] = ["rss_16b", "rss_64b", "rss_256b", "rss_1kib", "rss_4kib", "reclaim", "frag_32b", "frag_128b", "frag_512b", "frag_2kib"]
+	for kind in ops_kinds_with_large:
+		for size in ops_sizes_with_large:
+			sections.append(f"ops_{kind}_{size}")
+	for kind in ops_kinds_small:
+		for size in ops_sizes_small:
+			sections.append(f"ops_{kind}_{size}")
+	for size in ["8b", "16b", "64b", "256b", "1kib", "4kib"]:
+		sections.append(f"ops_aligned_malloc_{size}")
+		sections.append(f"ops_aligned_free_{size}")
+	sections.extend(["first_16b", "first_4kib", "first_1mib"])
+	sections.extend(["handoff_8b", "handoff_16b", "handoff_64b", "handoff_256b", "handoff_1kib", "handoff_4kib"])
+	sections.extend(["app_mt", "app_st"])
+	for size in ["16b", "64b", "256b", "1kib"]:
+		sections.append(f"locality_{size}")
+	return sections
+
+def parse_size_token(size_str: str) -> int:
+	if size_str.endswith("mib"):
+		return int(size_str[:-3]) * 1024 * 1024
+	if size_str.endswith("kib"):
+		return int(size_str[:-3]) * 1024
+	if size_str.endswith("b"):
+		return int(size_str[:-1])
+	raise ValueError(f"invalid size token: {size_str}")
+
+def append_static_desc_headers(txt_file: Path) -> None:
+	_BENCH_LOG_DEDUPE.clear()
+	lines: List[str] = [
+		"BENCH|type=desc|test=system / time|what=process runtime split|measures=user sys elapsed maxrss minflt|method=GNU time around each isolated section run|detects=runtime split and memory-fault pressure per section",
+		"BENCH|type=desc|test=system / perf|what=counter snapshot for benchmark process|measures=task_clock page_faults syscalls|method=perf stat around each isolated section run with strace for syscall count|detects=cpu-time and syscall pressure per section",
+	]
+	with open(txt_file, "w") as f:
+		for line in lines:
+			_BENCH_LOG_DEDUPE.add(line)
+			f.write(line + "\n")
+
+def should_keep_bench_line(line: str) -> bool:
+	if line.startswith("BENCH|type=desc|") or line.startswith("BENCH|type=meta|"):
+		if line in _BENCH_LOG_DEDUPE:
+			return False
+		_BENCH_LOG_DEDUPE.add(line)
+	return True
+
+def process_bench_logs(stderr_stream: Optional[IO[str]], log_file: Path) -> None:
+	if not stderr_stream:
+		return
+	with open(log_file, "a") as f:
+		for line in stderr_stream:
+			line = line.strip()
+			if line.startswith(BENCH_LOG_TAG + " "):
+				msg: str = line[len(BENCH_LOG_TAG) + 1:].strip()
+				if msg.startswith("type:"):
+					parts: List[str] = msg.split()
+					bench_line: str = "BENCH"
+					for part in parts:
+						if ":" in part:
+							k, v = part.split(":", 1)
+							bench_line += f"|{k}={v}"
+					if should_keep_bench_line(bench_line):
+						f.write(bench_line + "\n")
+				else:
+					if should_keep_bench_line(msg):
+						f.write(msg + "\n")
+			else:
+				f.write(line + "\n")
+
+def run_bench_worker(log_file: Path, alloc_name: str, section: str, run_bin_prefix: Path, extra_env: Dict[str, str], seed: str) -> None:
+	status_line(f"running: allocator={alloc_name} section={section if section else 'all'}")
+	perf_events, syscalls_available = init_perf_events()
+	section_field: str = f"|section={section}" if section else ""
+	time_format: str = f"BENCH|type=time{section_field}|user=%U|sys=%S|elapsed=%e|maxrss=%M|minflt=%R"
+
+	binary_name: Optional[str] = None
+	args: List[str] = [str(seed)]
+
+	if section.startswith("rss_"):
+		binary_name = "rss"
+		args.append(str(parse_size_token(section[4:])))
+	elif section == "reclaim":
+		binary_name = "reclaim"
+	elif section.startswith("frag_"):
+		binary_name = "frag"
+		args.append(str(parse_size_token(section[5:])))
+	elif section.startswith("ops_"):
+		binary_name = "ops"
+		kind, size_str = section[4:].rsplit("_", 1)
+		size_val: int = parse_size_token(size_str)
+		args.extend([kind, str(size_val)])
+	elif section.startswith("first_"):
+		binary_name = "first"
+		args.append(str(parse_size_token(section[6:])))
+	elif section.startswith("handoff_"):
+		binary_name = "handoff"
+		size_val = parse_size_token(section[8:])
+		if size_val == 8:
+			args.extend(["postfree", "8"])
+		else:
+			args.extend(["foreign", str(size_val)])
+	elif section == "app_mt":
+		binary_name = "app_mt"
+	elif section == "app_st":
+		binary_name = "app_st"
+	elif section.startswith("locality_"):
+		binary_name = "locality"
+		args.append(str(parse_size_token(section[9:])))
+
+	if not binary_name:
+		return
+
+	run_bin: Path = Path(f"{run_bin_prefix}_{binary_name}")
+	run_single_bench(log_file, run_bin, args, extra_env, perf_events, time_format, section_field, syscalls_available)
+
+def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: Dict[str, str], perf_events: str, time_format: str, section_field: str, syscalls_available: bool) -> None:
+	with tempfile.TemporaryDirectory(prefix="bench_tmp_") as tmp_dir:
+		tmp_path: Path = Path(tmp_dir)
+		time_file: Path = tmp_path / "time.txt"
+		perf_file: Path = tmp_path / "perf.txt"
+		strace_file: Path = tmp_path / "strace.txt"
+
+		cmd: List[str] = ["/usr/bin/time", "-f", time_format, "-o", str(time_file), "perf", "stat", "-x,", "-o", str(perf_file), "-e", perf_events, "--", str(run_bin)]
+		cmd.extend(args)
+
+		env: Dict[str, str] = os.environ.copy()
+		env.update(extra_env)
+
+		with subprocess.Popen(cmd, env=env, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True) as proc:
+			process_bench_logs(proc.stderr, log_file)
+
+		if time_file.is_file() and time_file.stat().st_size > 0:
+			with open(log_file, "a") as f_out:
+				f_out.write(time_file.read_text() + "\n")
+
+		syscalls: str = "na"
+		task_clock: str = "na"
+		page_faults: str = "na"
+
+		if not syscalls_available:
+			syscalls = "unavailable"
+
+		if perf_file.is_file() and perf_file.stat().st_size > 0:
+			for line in perf_file.read_text().splitlines():
+				parts: List[str] = line.split(",")
+				if len(parts) >= 3:
+					val, event = parts[0].strip(), parts[2].strip()
+					if "sys_enter" in event:
+						syscalls = val
+					elif "task-clock" in event:
+						task_clock = val
+					elif "page-faults" in event:
+						page_faults = val
+
+		if not syscalls_available and shutil.which("strace"):
+			strace_cmd: List[str] = ["strace", "-f", "-qq", "-c", "-o", str(strace_file), "--", str(run_bin)]
+			strace_cmd.extend(args)
+			subprocess.run(strace_cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+			if strace_file.is_file() and strace_file.stat().st_size > 0:
+				for line in strace_file.read_text().splitlines():
+					if " total" in line:
+						parts = line.split()
+						if len(parts) >= 3:
+							syscalls = parts[-2]
+
+		with open(log_file, "a") as f_out:
+			f_out.write(f"BENCH|type=perf{section_field}|syscalls={syscalls}|task_clock={task_clock}|page_faults={page_faults}\n\n")
+
+def run_sections_for_allocator(allocator: str, run_bin_prefix: Path, extra_env: Dict[str, str], sections: List[str], seed: str) -> None:
+	with open(DEFAULT_TXT, "a") as f:
+		f.write(f"\n========== {allocator} ==========\n")
+	env: Dict[str, str] = extra_env.copy()
+	for sec in sections:
+		run_bench_worker(DEFAULT_TXT, allocator, sec, run_bin_prefix, env, seed)
+
+def find_lib(name: str) -> Optional[str]:
+	try:
+		res: subprocess.CompletedProcess = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True)
+		for line in res.stdout.splitlines():
+			if name in line and "=>" in line:
+				return line.split("=>")[-1].strip()
+	except Exception:
+		pass
+	return None
+
+def prefix_allocators(tag: str, input_path: str, output_path: str) -> None:
+	lines: List[str] = []
+	for line in Path(input_path).read_text().splitlines(keepends=True):
+		prefix: str = ""
+		if line.startswith("\n"):
+			prefix = "\n"
+			line = line[1:]
+		if line.startswith("=========="):
+			rest: str = line[10:]
+			pos: int = rest.find("==========")
+			if pos > 0:
+				name: str = rest[:pos].strip()
+				if name:
+					lines.append(f"{prefix}========== {tag} / {name} ==========\n")
+					continue
+		lines.append(line)
+	Path(output_path).write_text("".join(lines))
+
+def extract_allocator_log(allocator_name: str, input_path: str, output_path: str) -> None:
+	lines: List[str] = []
+	in_target: bool = False
+	seen_global: Set[str] = set()
+	for line in Path(input_path).read_text().splitlines(keepends=True):
+		trimmed: str = line.lstrip("\n")
+		if trimmed.startswith("=========="):
+			rest: str = trimmed[10:]
+			pos: int = rest.find("==========")
+			if pos > 0:
+				name: str = rest[:pos].strip()
+				in_target = (name == allocator_name)
+				if in_target:
+					lines.append(line)
+				continue
+		if trimmed.startswith("BENCH|"):
+			if trimmed.startswith("BENCH|type=desc|") or trimmed.startswith("BENCH|type=meta|"):
+				key: str = trimmed.strip()
+				if key not in seen_global:
+					seen_global.add(key)
+					lines.append(line)
+			elif in_target:
+				lines.append(line)
+	Path(output_path).write_text("".join(lines))
+
+def cmd_chaos(args: argparse.Namespace) -> None:
+	status_line("building: chaos_build")
+	status_run(["make", "-C", str(ROOT_DIR), "chaos_build"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	try:
+		status_line("running: test_chaos")
+		status_run([str(BIN_DIR / "test_chaos")], check=False)
+	except KeyboardInterrupt:
+		pass
+	status_done()
+
+def cmd_dump(args: argparse.Namespace) -> None:
+	lib_path: str = args.lib if args.lib else str(BIN_DIR / "liballoc_release_objdump.so")
+	if not shutil.which("objdump"):
+		sys.exit("objdump not found in PATH")
+	if Path(lib_path).resolve() == (BIN_DIR / "liballoc_release_objdump.so").resolve():
+		status_line("building: liballoc_release_objdump")
+		subprocess.run(["make", "-C", str(ROOT_DIR), "liballoc_release_objdump"], check=False, stdout=subprocess.DEVNULL)
+	if not Path(lib_path).is_file():
+		status_done()
+		sys.exit(f"library not found: {lib_path}")
+	status_line(f"running: objdump function={args.function}")
+	status_run(["objdump", "-d", "-C", "-M", "intel", "--line-numbers", f"--disassemble={args.function}", lib_path])
+	status_done()
+
+def cmd_install(args: argparse.Namespace) -> None:
+	target_dir: Path = Path.home() / ".local" / "bin"
+	target: Path = target_dir / args.name
+	target_dir.mkdir(parents=True, exist_ok=True)
+	target.unlink(missing_ok=True)
+	target.symlink_to(ROOT_DIR / "dev" / "alloc")
+	print(f"installed: {target}")
+
+def cmd_build(args: argparse.Namespace) -> None:
+	target_map: Dict[str, str] = {
+		"all": "libs",
+		"release": "liballoc_release",
+		"release_objdump": "liballoc_release_objdump",
+		"debug": "liballoc_debug",
+		"dev": "liballoc_dev",
+		"instrumented": "liballoc_instrumented",
+	}
+
+	target: str = target_map[args.what]
+	status_line(f"building: {target}")
+	status_run(["make", "-C", str(ROOT_DIR), target], check=True)
+	status_done()
+
+def cmd_bench_list(args: Optional[argparse.Namespace] = None) -> None:
+	ensure_runs_dir()
+	names: List[str] = list_run_names()
+	comparisons: List[str] = list_comparison_bases()
+	if not names and not comparisons:
+		print(f"no archived runs or comparisons in {RUNS_DIR}")
+		return
+	if names:
+		print(f"{'idx':<5} {'run':<28} files")
+		for i, name in enumerate(names, 1):
+			run_dir: Path = RUNS_DIR / name
+			files: int = sum(1 for f in ["log.txt", "report.html"] if (run_dir / f).is_file())
+			print(f"{i:<5} {name:<28} {files}/2")
+	if comparisons:
+		if names:
+			print()
+		print(f"{'idx':<5} {'comparison':<56} files")
+		for i, name in enumerate(comparisons, 1):
+			files = sum(1 for ext in [".txt", ".html"] if (COMPARE_DIR / f"{name}{ext}").is_file())
+			print(f"{i:<5} {name:<56} {files}/2")
+
+def cmd_bench_run(args: argparse.Namespace) -> None:
+	ensure_runs_dir()
+	ensure_bench_bins()
+	ensure_report_script()
+	if not shutil.which("perf"):
+		sys.exit("perf is required but not found in PATH")
+	if not shutil.which("/usr/bin/time"):
+		sys.exit("/usr/bin/time is required but not found")
+
+	bench_sections: List[str] = [s.strip() for s in args.only.replace(",", " ").split() if s.strip()] if args.only else default_sections()
+	if not bench_sections:
+		sys.exit("no benchmark sections selected")
+
+	status_line("building: build_dev_bench")
+	subprocess.run(["make", "-C", str(ROOT_DIR), "build_dev_bench"], check=False, stdout=subprocess.DEVNULL)
+	append_static_desc_headers(DEFAULT_TXT)
+
+	seed: str = os.environ.get("BENCH_SEED", str(random.randint(1, 2**31 - 1)))
+	other_bin: Path = BIN_DIR / "bench_detailed_other"
+	alloc_bin: Path = BIN_DIR / "bench_detailed_alloc"
+
+	if not args.alloc_only:
+		run_sections_for_allocator("pt2malloc", other_bin, {}, bench_sections, seed)
+
+		jemalloc: Optional[str] = find_lib("libjemalloc.so")
+		if jemalloc:
+			run_sections_for_allocator("jemalloc", other_bin, {"LD_PRELOAD": jemalloc}, bench_sections, seed)
+
+		mimalloc: Optional[str] = find_lib("libmimalloc.so")
+		if mimalloc:
+			run_sections_for_allocator("mimalloc", other_bin, {"LD_PRELOAD": mimalloc}, bench_sections, seed)
+
+		tcmalloc: Optional[str] = find_lib("libtcmalloc_minimal.so")
+		if tcmalloc:
+			run_sections_for_allocator("tcmalloc", other_bin, {"LD_PRELOAD": tcmalloc}, bench_sections, seed)
+
+		tbb_proxy: Optional[str] = find_lib("libtbbmalloc_proxy.so")
+		tbb_base: Optional[str] = find_lib("libtbbmalloc.so")
+		tbb_preload: Optional[str] = tbb_proxy if tbb_proxy else tbb_base
+		if tbb_preload and subprocess.run(["/bin/true"], env={"LD_PRELOAD": tbb_preload}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+			run_sections_for_allocator("tbbmalloc", other_bin, {"LD_PRELOAD": tbb_preload}, bench_sections, seed)
+		else:
+			print("tbbmalloc preload unavailable, skipping", file=sys.stderr)
+			with open(DEFAULT_TXT, "a") as f:
+				f.write("BENCH|type=meta|allocator=tbbmalloc|status=skipped|reason=preload_unavailable\n\n")
+
+	alloc_env: Dict[str, str] = {
+		"LD_LIBRARY_PATH": f"{BIN_DIR}:{os.environ.get('LD_LIBRARY_PATH', '')}",
+		"DYLD_LIBRARY_PATH": f"{BIN_DIR}:{os.environ.get('DYLD_LIBRARY_PATH', '')}"
+	}
+	run_sections_for_allocator("alloc", alloc_bin, alloc_env, bench_sections, seed)
+
+	report_cmd: List[str] = ["report", str(DEFAULT_TXT), str(DEFAULT_HTML)]
+	if args.good_max:
+		report_cmd.extend(["--good-max", str(args.good_max)])
+	status_line("running: bench_detailed_report")
+	report.main(report_cmd)
+
+	if not DEFAULT_TXT.is_file() or not DEFAULT_HTML.is_file():
+		sys.exit("missing log or html output after run")
+
+	stamp: str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+	run_name: str = f"{stamp}_{sanitize_label(args.label)}"
+	run_dir: Path = RUNS_DIR / run_name
+	run_dir.mkdir(parents=True, exist_ok=True)
+
+	shutil.copy2(DEFAULT_TXT, run_dir / "log.txt")
+	shutil.copy2(DEFAULT_HTML, run_dir / "report.html")
+
+	git_head: str = ""
+	try:
+		git_head = subprocess.run(["git", "-C", str(ROOT_DIR), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+	except Exception:
+		pass
+
+	with open(run_dir / "meta.env", "w") as f:
+		f.write(f"name={run_name}\ncreated_at={datetime.datetime.now().isoformat()}\n")
+		f.write(f"target={'bench_detailed_alloc_only' if args.alloc_only else 'bench_detailed'}\n")
+		f.write(f"bench_only={args.only if args.only else ''}\nalloc_only={1 if args.alloc_only else 0}\n")
+		f.write(f"good_max={args.good_max if args.good_max else ''}\ngit_head={git_head}\n")
+
+	status_done()
+	print(f"archived run: {run_name}")
+	print(f"log:  {run_dir / 'log.txt'}")
+	print(f"html: {run_dir / 'report.html'}")
+	maybe_open_html(run_dir / "report.html", args.open)
+
+def cmd_bench_show(args: argparse.Namespace) -> None:
+	ensure_runs_dir()
+	ensure_report_script()
+	run_name: str = resolve_run_token_or_exit(args.run_token)
+	run_dir: Path = RUNS_DIR / run_name
+	txt: Path = run_dir / "log.txt"
+	html: Path = run_dir / "report.html"
+	if not txt.is_file():
+		sys.exit(f"missing {txt}")
+
+	report_cmd: List[str] = ["report", str(txt), str(html)]
+	if args.good_max:
+		report_cmd.extend(["--good-max", str(args.good_max)])
+	if args.focus:
+		report_cmd.extend(["--focus", str(args.focus)])
+	if args.focus_list:
+		report_cmd.extend(["--focus-list", str(args.focus_list)])
+	status_line(f"running: bench_detailed_report run={run_name}")
+	report.main(report_cmd)
+	status_done()
+
+	print(f"run:  {run_name}")
+	print(f"html: {html}")
+	maybe_open_html(html, args.open)
+
+def cmd_bench_regen(args: argparse.Namespace) -> None:
+	ensure_runs_dir()
+	ensure_report_script()
+	target: str = args.target
+
+	report_args: List[str] = []
+	if args.good_max:
+		report_args.extend(["--good-max", str(args.good_max)])
+	if args.focus:
+		report_args.extend(["--focus", str(args.focus)])
+	if args.focus_list:
+		report_args.extend(["--focus-list", str(args.focus_list)])
+
+	def do_regen(txt_path: Path, html_path: Path) -> None:
+		status_line(f"running: bench_detailed_report input={txt_path.name}")
+		report.main(["report", str(txt_path), str(html_path)] + report_args)
+
+	if target == "all":
+		any_found: bool = False
+		for name in list_run_names():
+			run_dir: Path = RUNS_DIR / name
+			if (run_dir / "log.txt").is_file():
+				any_found = True
+				print(f"regen run: {name}")
+				do_regen(run_dir / "log.txt", run_dir / "report.html")
+		for name in list_comparison_bases():
+			txt_path: Path = COMPARE_DIR / f"{name}.txt"
+			if txt_path.is_file():
+				any_found = True
+				print(f"regen compare: {name}.txt")
+				do_regen(txt_path, COMPARE_DIR / f"{name}.html")
+		if DEFAULT_TXT.is_file():
+			any_found = True
+			print(f"regen default: {DEFAULT_TXT}")
+			do_regen(DEFAULT_TXT, DEFAULT_HTML)
+		if not any_found:
+			print("no txt files found to regenerate")
+		status_done()
+		return
+
+	if target == "latest":
+		names: List[str] = list_run_names()
+		if names:
+			print(f"regen latest run: {names[0]}")
+			do_regen(RUNS_DIR / names[0] / "log.txt", RUNS_DIR / names[0] / "report.html")
+			status_done()
+			maybe_open_html(RUNS_DIR / names[0] / "report.html", args.open)
+			return
+		if DEFAULT_TXT.is_file():
+			print(f"regen default: {DEFAULT_TXT}")
+			do_regen(DEFAULT_TXT, DEFAULT_HTML)
+			status_done()
+			maybe_open_html(DEFAULT_HTML, args.open)
+			return
+		sys.exit(f"no archived runs and no {DEFAULT_TXT} found")
+
+	run_name: str = resolve_run_token_or_exit(target)
+	print(f"regen run: {run_name}")
+	html: Path = RUNS_DIR / run_name / "report.html"
+	do_regen(RUNS_DIR / run_name / "log.txt", html)
+	status_done()
+	maybe_open_html(html, args.open)
+
+def cmd_bench_compare(args: argparse.Namespace) -> None:
+	ensure_runs_dir()
+	ensure_report_script()
+	run_a: str = resolve_run_token_or_exit(args.runA)
+	run_b: str = resolve_run_token_or_exit(args.runB)
+
+	txt_a: Path = RUNS_DIR / run_a / "log.txt"
+	txt_b: Path = RUNS_DIR / run_b / "log.txt"
+	if not txt_a.is_file(): sys.exit(f"missing {txt_a}")
+	if not txt_b.is_file(): sys.exit(f"missing {txt_b}")
+
+	stamp: str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+	cmp_name: str = f"{stamp}_{run_a}_vs_{run_b}"
+	merged_txt: Path = COMPARE_DIR / f"{cmp_name}.txt"
+	cmp_html: Path = COMPARE_DIR / f"{cmp_name}.html"
+
+	with tempfile.TemporaryDirectory() as tmp_dir:
+		tmp_path: Path = Path(tmp_dir)
+		tmp_a: Path = tmp_path / "a.txt"
+		tmp_b: Path = tmp_path / "b.txt"
+		src_a: Path = tmp_path / "src_a.txt"
+		src_b: Path = tmp_path / "src_b.txt"
+
+		extract_allocator_log(args.allocator, str(txt_a), str(src_a))
+		extract_allocator_log(args.allocator, str(txt_b), str(src_b))
+		prefix_allocators(f"A:{run_a}", str(src_a), str(tmp_a))
+		prefix_allocators(f"B:{run_b}", str(src_b), str(tmp_b))
+
+		merged_txt.write_text(tmp_a.read_text() + tmp_b.read_text())
+
+		report_cmd: List[str] = ["report", str(merged_txt), str(cmp_html)]
+		if args.good_max:
+			report_cmd.extend(["--good-max", str(args.good_max)])
+		if args.focus:
+			report_cmd.extend(["--focus", str(args.focus)])
+		if args.focus_list:
+			report_cmd.extend(["--focus-list", str(args.focus_list)])
+		status_line(f"running: bench_detailed_report compare={run_a}_vs_{run_b} allocator={args.allocator}")
+		report.main(report_cmd)
+
+	status_done()
+	print(f"compare: {run_a} vs {run_b} (allocator={args.allocator})")
+	print(f"txt:     {merged_txt}")
+	print(f"html:    {cmp_html}")
+	maybe_open_html(cmp_html, args.open)
+
+def cmd_bench_prune(args: argparse.Namespace) -> None:
+	ensure_runs_dir()
+
+	prune_runs: bool = args.all or args.runs
+	prune_comps: bool = args.all or args.comparisons
+	if not args.runs and not args.comparisons and not args.all:
+		prune_runs = True
+		prune_comps = True
+
+	keep: Optional[int] = args.keep
+	older_than: Optional[int] = args.older_than
+
+	if keep is None and older_than is None:
+		if args.all:
+			keep = 0
+		else:
+			keep = 1
+			print("no prune criteria provided, defaulting to --keep 1")
+
+	doomed_runs: List[Path] = []
+	doomed_comps: List[Path] = []
+	now: float = datetime.datetime.now().timestamp()
+
+	if prune_runs:
+		for i, name in enumerate(list_run_names()):
+			run_dir: Path = RUNS_DIR / name
+			remove: bool = False
+			if keep is not None and (i + 1) > keep:
+				remove = True
+			if older_than is not None and run_dir.stat().st_mtime < (now - (older_than * 86400)):
+				remove = True
+			if remove:
+				doomed_runs.append(run_dir)
+
+	if prune_comps:
+		for i, name in enumerate(list_comparison_bases()):
+			txt: Path = COMPARE_DIR / f"{name}.txt"
+			html: Path = COMPARE_DIR / f"{name}.html"
+			remove = False
+			if keep is not None and (i + 1) > keep:
+				remove = True
+			if older_than is not None:
+				probe: Path = txt if txt.is_file() else html
+				if probe.is_file() and probe.stat().st_mtime < (now - (older_than * 86400)):
+					remove = True
+			if remove:
+				doomed_comps.append(txt)
+				if html.is_file():
+					doomed_comps.append(html)
+
+	if not doomed_runs and not doomed_comps:
+		print("nothing to prune")
+		return
+
+	if doomed_runs:
+		print("runs to delete:")
+		for d in doomed_runs: print(f"  - {d}")
+	if doomed_comps:
+		print("comparison files to delete:")
+		for d in doomed_comps: print(f"  - {d}")
+
+	if not args.yes:
+		ans: str = input("continue? [y/N] ").strip().lower()
+		if ans not in ("y", "yes"):
+			sys.exit("aborted")
+
+	for d in doomed_runs:
+		shutil.rmtree(d, ignore_errors=True)
+	for d in doomed_comps:
+		if d.exists():
+			d.unlink()
+
+	print(f"deleted {len(doomed_runs)} run(s), {len(doomed_comps)} comparison file(s)")
+
+def main() -> None:
+	parser: argparse.ArgumentParser = argparse.ArgumentParser(prog="alloc", description="Allocator development script")
+	subparsers: argparse._SubParsersAction = parser.add_subparsers(dest="command", required=True)
+
+	p_chaos: argparse.ArgumentParser = subparsers.add_parser("chaos", help="Build and run chaos test")
+	p_chaos.set_defaults(func=cmd_chaos)
+
+	p_dump: argparse.ArgumentParser = subparsers.add_parser("dump", help="Dump one function with line info")
+	p_dump.add_argument("function", help="Function to dump")
+	p_dump.add_argument("--lib", help="Path to objdump-friendly library")
+	p_dump.set_defaults(func=cmd_dump)
+
+	p_install: argparse.ArgumentParser = subparsers.add_parser("install", help="Symlink CLI into ~/.local/bin")
+	p_install.add_argument("--name", default="alloc", help="Symlink name")
+	p_install.set_defaults(func=cmd_install)
+
+	p_build: argparse.ArgumentParser = subparsers.add_parser("build", help="Build allocator libraries")
+	p_build.add_argument(
+		"what",
+		nargs="?",
+		default="all",
+		choices=["all", "release", "release_objdump", "debug", "dev", "instrumented"],
+		help="Build target (default: all)"
+	)
+	p_build.set_defaults(func=cmd_build)
+
+	p_bench: argparse.ArgumentParser = subparsers.add_parser("bench", help="Delegate to bench manager")
+	bench_sub: argparse._SubParsersAction = p_bench.add_subparsers(dest="bench_command", required=True)
+
+	p_run: argparse.ArgumentParser = bench_sub.add_parser("run", help="Run benchmarks")
+	p_run.add_argument("--label", default="run")
+	p_run.add_argument("--only", help="Comma-separated sections")
+	p_run.add_argument("--alloc-only", action="store_true")
+	p_run.add_argument("--good-max")
+	p_run.add_argument("--open", action="store_true", help="Open HTML report automatically")
+	p_run.set_defaults(func=cmd_bench_run)
+
+	p_list: argparse.ArgumentParser = bench_sub.add_parser("list", help="List archived runs")
+	p_list.set_defaults(func=cmd_bench_list)
+
+	p_show: argparse.ArgumentParser = bench_sub.add_parser("show", help="Regenerate HTML for one archived run")
+	p_show.add_argument("--good-max")
+	p_show.add_argument("--focus")
+	p_show.add_argument("--focus-list")
+	p_show.add_argument("--open", action="store_true", help="Open HTML report automatically")
+	p_show.add_argument("run_token", metavar="index|name")
+	p_show.set_defaults(func=cmd_bench_show)
+
+	p_regen: argparse.ArgumentParser = bench_sub.add_parser("regen", help="Regenerate HTML from existing txt logs")
+	p_regen.add_argument("--good-max")
+	p_regen.add_argument("--focus")
+	p_regen.add_argument("--focus-list")
+	p_regen.add_argument("--open", action="store_true", help="Open HTML report automatically")
+	p_regen.add_argument("target", nargs="?", default="latest")
+	p_regen.set_defaults(func=cmd_bench_regen)
+
+	p_compare: argparse.ArgumentParser = bench_sub.add_parser("compare", help="Build comparison HTML merging two archived logs")
+	p_compare.add_argument("--allocator", default="alloc")
+	p_compare.add_argument("--good-max")
+	p_compare.add_argument("--focus")
+	p_compare.add_argument("--focus-list")
+	p_compare.add_argument("--open", action="store_true", help="Open HTML report automatically")
+	p_compare.add_argument("runA")
+	p_compare.add_argument("runB")
+	p_compare.set_defaults(func=cmd_bench_compare)
+
+	p_prune: argparse.ArgumentParser = bench_sub.add_parser("prune", help="Delete archived runs and/or comparisons")
+	p_prune.add_argument("--keep", type=int)
+	p_prune.add_argument("--older-than", type=int)
+	p_prune.add_argument("--runs", action="store_true")
+	p_prune.add_argument("--comparisons", action="store_true")
+	p_prune.add_argument("--all", action="store_true")
+	p_prune.add_argument("--yes", action="store_true")
+	p_prune.set_defaults(func=cmd_bench_prune)
+
+	args: argparse.Namespace = parser.parse_args()
+	args.func(args)
+
+if __name__ == "__main__":
+	main()

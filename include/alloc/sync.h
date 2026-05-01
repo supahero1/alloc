@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024-2025 Franciszek Balcerak
+ *   Copyright 2024-2026 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,9 +16,7 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <alloc/attr.h>
 
 #include <stdint.h>
 #include <pthread.h>
@@ -30,6 +28,12 @@ typedef pthread_mutex_t sync_mtx_t;
 
 extern void
 sync_mtx_init(
+	sync_mtx_t* mtx
+	);
+
+
+extern void
+sync_mtx_init_recursive(
 	sync_mtx_t* mtx
 	);
 
@@ -164,8 +168,3 @@ extern void
 sync_sem_post(
 	sync_sem_t* sem
 	);
-
-
-#ifdef __cplusplus
-}
-#endif

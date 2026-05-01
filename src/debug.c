@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024-2025 Franciszek Balcerak
+ *   Copyright 2024-2026 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,20 +14,23 @@
  *  limitations under the License.
  */
 
-#include "../include/debug.h"
+#include <alloc/debug.h>
+#include <alloc/macro.h>
 
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <execinfo.h>
 
 #if __has_include(<execinfo.h>)
 	#define DEBUG_STACK_TRACE
 
-	#include <execinfo.h>
 #endif
 
 
-private void
+void
 print_stack_trace(
 	void
 	)
@@ -35,14 +38,64 @@ print_stack_trace(
 #ifdef DEBUG_STACK_TRACE
 	void* buffer[256];
 	int count = backtrace(buffer, 256);
+
+	write(STDERR_FILENO, "Raw stack trace:\n", 17);
+	backtrace_symbols_fd(buffer, count, STDERR_FILENO);
+
 	char** symbols = backtrace_symbols(buffer, count);
 
-	fprintf(stderr, "Stack trace (%d):\n", count);
+	char out[16 * 1024];
+	size_t off = 0;
+	size_t cap = sizeof(out);
+	int width = snprintf(NULL, 0, "%d", count);
+
+	off += snprintf(out + off, cap - off, "Stack trace (%d):\n", count);
+
+	char line[512];
+	char cmd[512];
 
 	for(int i = 0; i < count; ++i)
 	{
-		fprintf(stderr, "#%d:\t%s\n", i + 1, symbols[i]);
+		int num = i + 1;
+		int digits = snprintf(NULL, 0, "%d", num);
+
+		off += snprintf(out + off, cap - off, "#%d:", num);
+
+		for(int s = 0; s < width - digits + 1 && off < cap; ++s)
+		{
+			out[off++] = ' ';
+		}
+
+		int ok = 0;
+
+		Dl_info info;
+		if(dladdr(buffer[i], &info) && info.dli_fname)
+		{
+			void* offset = (void*)(buffer[i] - info.dli_fbase);
+			snprintf(cmd, sizeof(cmd), "addr2line -f -p -e %s %p 2>/dev/null", info.dli_fname, offset);
+
+			FILE* fp = popen(cmd, "r");
+			if(fp)
+			{
+				if(fgets(line, sizeof(line), fp))
+				{
+					ok = line[0] != '?';
+				}
+
+				pclose(fp);
+			}
+		}
+
+		off += snprintf(out + off, cap - off, ok ? "%s" : "%s\n", ok ? line : symbols[i]);
+		if(off >= cap)
+		{
+			break;
+		}
 	}
+
+	out[cap - 1] = '\0';
+
+	fprintf(stderr, "%s", out);
 
 	free(symbols);
 #else

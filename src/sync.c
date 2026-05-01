@@ -14,9 +14,11 @@
  *  limitations under the License.
  */
 
-#include "../include/sync.h"
-#include "../include/debug.h"
+#include <alloc/sync.h>
+#include <alloc/debug.h>
+#include <alloc/macro.h>
 
+#include <time.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +32,28 @@ sync_mtx_init(
 	assert_not_null(mtx);
 
 	int status = pthread_mutex_init(mtx, NULL);
+	hard_assert_eq(status, 0);
+}
+
+
+void
+sync_mtx_init_recursive(
+	sync_mtx_t* mtx
+	)
+{
+	assert_not_null(mtx);
+
+	pthread_mutexattr_t attr;
+	int status = pthread_mutexattr_init(&attr);
+	hard_assert_eq(status, 0);
+
+	status = pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+	hard_assert_eq(status, 0);
+
+	status = pthread_mutex_init(mtx, &attr);
+	hard_assert_eq(status, 0);
+
+	status = pthread_mutexattr_destroy(&attr);
 	hard_assert_eq(status, 0);
 }
 

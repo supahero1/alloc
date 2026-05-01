@@ -1,5 +1,5 @@
 /*
- *   Copyright 2024-2025 Franciszek Balcerak
+ *   Copyright 2024-2026 Franciszek Balcerak
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,15 +16,12 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <alloc/attr.h>
 
-#include "macro.h"
+#include <stddef.h>
 
 
-__attribute__((noreturn))
-extern void
+extern attr_noreturn void
 assert_failed(
 	const char* msg1,
 	const char* type1,
@@ -35,8 +32,7 @@ assert_failed(
 	);
 
 
-__attribute__((noreturn))
-extern void
+extern attr_noreturn void
 unreachable_assert_failed(
 	const char* msg
 	);
@@ -49,18 +45,13 @@ location_logger(
 	);
 
 
-#define ASSERT_NULL ((const volatile void*) 0)
-
-#define assert_unlikely(x) __builtin_expect(!!(x), 0)
-#define assert_likely(x) __builtin_expect(!!(x), 1)
-
 #define hard_assert_base(a, b, Op, ROp, ...)	\
 do												\
 {												\
-	typeof(b) _a = (a);							\
-	typeof(b) _b = (b);							\
+	TYPEOF(a) _a = a;							\
+	TYPEOF(a) _b = b;							\
 												\
-	if(!assert_likely(_a Op _b))				\
+	if(!attr_likely(_a Op _b))					\
 	{											\
 		__VA_ARGS__ __VA_OPT__(;)				\
 												\
@@ -70,18 +61,11 @@ do												\
 while(0)
 #define hard_assert_eq(a, b, ...) hard_assert_base(a, b, ==, != __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_neq(a, b, ...) hard_assert_base(a, b, !=, == __VA_OPT__(,) __VA_ARGS__)
-#define hard_assert_true(a, ...) hard_assert_eq(a, true __VA_OPT__(,) __VA_ARGS__)
-#define hard_assert_false(a, ...) hard_assert_eq(a, false __VA_OPT__(,) __VA_ARGS__)
-#define hard_assert_null(a, ...) hard_assert_eq(a, ASSERT_NULL __VA_OPT__(,) __VA_ARGS__)
-#define hard_assert_not_null(a, ...) hard_assert_neq(a, ASSERT_NULL __VA_OPT__(,) __VA_ARGS__)
-#define hard_assert_ptr(ptr, size, ...)				\
-hard_assert_not_null(ptr,							\
-	{												\
-		bool is_zero = sizeof(*ptr) * size == 0;	\
-		if(assert_likely(is_zero)) break;			\
-		__VA_ARGS__ __VA_OPT__(;)					\
-	}												\
-	)
+#define hard_assert_true(a, ...) hard_assert_eq(!!(a), true __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_false(a, ...) hard_assert_eq(!!(a), false __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_null(a, ...) hard_assert_eq(a, NULL __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_not_null(a, ...) hard_assert_neq(a, NULL __VA_OPT__(,) __VA_ARGS__)
+#define hard_assert_ptr(ptr, size, ...) hard_assert_false(sizeof(*(ptr)) && !(ptr) && (size), __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_lt(a, b, ...) hard_assert_base(a, b, <, >= __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_le(a, b, ...) hard_assert_base(a, b, <=, > __VA_OPT__(,) __VA_ARGS__)
 #define hard_assert_gt(a, b, ...) hard_assert_base(a, b, >, <= __VA_OPT__(,) __VA_ARGS__)
@@ -102,10 +86,10 @@ location_logger("at " __FILE__ ":" MACRO_STR(__LINE__) __VA_OPT__(":") "\n" __VA
 #define empty_assert_base(a, b, Op, ...)	\
 do											\
 {											\
-	typeof(b) _a = (a);						\
-	typeof(b) _b = (b);						\
+	TYPEOF(a) _a = a;						\
+	TYPEOF(a) _b = b;						\
 											\
-	if(!assert_likely(_a Op _b))			\
+	if(!attr_likely(_a Op _b))				\
 	{										\
 		__VA_ARGS__ __VA_OPT__(;)			\
 											\
@@ -115,17 +99,11 @@ do											\
 while(0)
 #define empty_assert_eq(a, b, ...) empty_assert_base(a, b, ==)
 #define empty_assert_neq(a, b, ...) empty_assert_base(a, b, !=)
-#define empty_assert_true(a, ...) empty_assert_eq(a, true)
-#define empty_assert_false(a, ...) empty_assert_eq(a, false)
-#define empty_assert_null(a, ...) empty_assert_eq(a, ASSERT_NULL)
-#define empty_assert_not_null(a, ...) empty_assert_neq(a, ASSERT_NULL)
-#define empty_assert_ptr(ptr, size, ...)			\
-empty_assert_base(ptr, ASSERT_NULL, !=,				\
-	{												\
-		bool is_zero = sizeof(*ptr) * size == 0;	\
-		if(assert_likely(is_zero)) break;			\
-	}												\
-	)
+#define empty_assert_true(a, ...) empty_assert_eq(!!(a), true)
+#define empty_assert_false(a, ...) empty_assert_eq(!!(a), false)
+#define empty_assert_null(a, ...) empty_assert_eq(a, NULL)
+#define empty_assert_not_null(a, ...) empty_assert_neq(a, NULL)
+#define empty_assert_ptr(ptr, size, ...) empty_assert_false(sizeof(*(ptr)) && !(ptr) && (size))
 #define empty_assert_lt(a, b, ...) empty_assert_base(a, b, <)
 #define empty_assert_le(a, b, ...) empty_assert_base(a, b, <=)
 #define empty_assert_gt(a, b, ...) empty_assert_base(a, b, >)
@@ -161,7 +139,6 @@ assert_failed(										\
 	#define assert_ge(...) hard_assert_ge(__VA_ARGS__)
 	#define assert_unreachable(...) hard_assert_unreachable(__VA_ARGS__)
 	#define assert_log(...) hard_assert_log(__VA_ARGS__)
-	#define private
 #else
 	#define assert_fail(a, b, a_str, b_str, Op, ROp)	\
 	assert_fail_base(a, b, Op, ROp, "(anonymous)")
@@ -179,16 +156,6 @@ assert_failed(										\
 	#define assert_ge(...) empty_assert_ge(__VA_ARGS__)
 	#define assert_unreachable(...) empty_assert_unreachable()
 	#define assert_log(...) empty_assert_log()
-	#define private static
 #endif
 
-#define assert_attr(...) __attribute__((__VA_ARGS__))
-#define assert_fallthrough() assert_attr(fallthrough)
-#define assert_ctor assert_attr(constructor)
-#define assert_dtor assert_attr(destructor)
-#define assert_used assert_attr(used)
-#define assert_packed assert_attr(packed)
-
-#ifdef __cplusplus
-}
-#endif
+#include <alloc/macro.h>
