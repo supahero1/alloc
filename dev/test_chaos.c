@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #define CHAOS_LOG_TAG "[alloc/chaos]"
 #define chaos_log_info(...) alloc_do_custom_log_tagged_info(STDERR_FILENO, CHAOS_LOG_TAG, __VA_ARGS__)
@@ -940,7 +941,14 @@ main(
 	chaos_queue_t foreign = {0};
 	sync_mtx_init(&foreign.mtx);
 
-	chaos_worker_t workers[CHAOS_WORKERS_CAP] = {0};
+	chaos_worker_t* workers = calloc(CHAOS_WORKERS_CAP, sizeof(*workers));
+	if(!workers)
+	{
+		chaos_log_error("workers allocation failed");
+		sync_mtx_free(&foreign.mtx);
+		return 1;
+	}
+
 	chaos_stats_t stats = {0};
 	chaos_stats_t prev_report_total = {0};
 
@@ -1046,6 +1054,7 @@ main(
 	}
 
 	sync_mtx_free(&foreign.mtx);
+	free(workers);
 
 	uint64_t live_bytes_final = chaos_live_bytes_load();
 	assert_eq(live_bytes_final, 0);

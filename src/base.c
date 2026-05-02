@@ -100,7 +100,7 @@ alloc_reset(
 }
 
 
-attr_noinline void
+attr_cold_fn void
 alloc_tls_init(
 	void
 	)
@@ -616,6 +616,22 @@ alloc_free_own_internal(
 	);
 
 
+attr_noinline void
+alloc_tcache_flush_ptr(
+	void* flush_ptr,
+	const alloc_handle_t* handle
+	)
+{
+	alloc_arena_header_t* flush_arena = alloc_ptr_to_arena(flush_ptr);
+	alloc_slab_idx_t flush_slab_idx = (((void*) flush_ptr - flush_arena->data) & handle->slab_mask)
+		>> alloc_consts.slab.small_shift;
+	alloc_slab_header_t* flush_slab_base = (void*) flush_arena + alloc_consts.arena.slab_indexable_offset;
+	alloc_slab_header_t* flush_slab = flush_slab_base + flush_slab_idx;
+
+	alloc_free_own_internal(flush_ptr, flush_arena, flush_slab);
+}
+
+
 bool
 alloc_tcache_try_push_handle(
 	alloc_handle_idx_t handle_idx,
@@ -626,8 +642,7 @@ alloc_tcache_try_push_handle(
 	assert_not_null(handle);
 	assert_not_null(ptr);
 
-	alloc_t capacity = alloc_consts.tcache.capacity;
-	if(attr_unlikely(!capacity))
+	if(attr_unlikely(!alloc_consts.tcache.capacity))
 	{
 		return false;
 	}
@@ -635,24 +650,17 @@ alloc_tcache_try_push_handle(
 	alloc_tcache_class_t* class = alloc_tls.tcache.classes + handle_idx;
 	alloc_t count = class->count;
 
-	if(count >= capacity)
+	if(attr_unlikely(count >= alloc_consts.tcache.capacity))
 	{
-		alloc_t flush_count = alloc_consts.tcache.max_per_class;
-		for(alloc_t i = 0; i < flush_count; ++i)
+		for(alloc_t i = 0; i < alloc_consts.tcache.max_per_class; ++i)
 		{
 			void* flush_ptr = *class->head;
 			class->head = alloc_tcache_slot(class, class->head - class->ptr + 1);
 
-			alloc_arena_header_t* flush_arena = alloc_ptr_to_arena(flush_ptr);
-			alloc_slab_idx_t flush_slab_idx = (((void*) flush_ptr - flush_arena->data) & handle->slab_mask)
-				>> alloc_consts.slab.small_shift;
-			alloc_slab_header_t* flush_slab_base = (void*) flush_arena + alloc_consts.arena.slab_indexable_offset;
-			alloc_slab_header_t* flush_slab = flush_slab_base + flush_slab_idx;
-
-			alloc_free_own_internal(flush_ptr, flush_arena, flush_slab);
+			alloc_tcache_flush_ptr(flush_ptr, handle);
 		}
 
-		count -= flush_count;
+		count -= alloc_consts.tcache.max_per_class;
 	}
 
 	*class->tail = ptr;
@@ -986,7 +994,7 @@ alloc_alloc_e(
 		return ptr;
 	}
 
-	alloc_log_debug("alloc(): size=", size, " zero=", zero);
+	alloc_log_debug("alloc(): size=", size, " zero=", zero, " tid=", alloc_tls.tid);
 
 	alloc_handle_idx_t handle_idx = alloc_get_handle_idx(size);
 	const alloc_handle_t* handle = alloc_tls.handles + handle_idx;
@@ -1071,30 +1079,30 @@ alloc_free_own_internal(
 		{
 			alloc_handle_ret_empty_slab(handle, slab);
 		}
+
+		return;
 	}
-	else
+
+	if(attr_unlikely(slab->count == slab->alloc_limit - 1))
 	{
-		if(attr_unlikely(slab->count == slab->alloc_limit - 1))
+		alloc_handle_t* handle = slab->handle;
+
+		if(handle->slab)
 		{
-			alloc_handle_t* handle = slab->handle;
-
-			if(handle->slab)
-			{
-				handle->slab->prev = slab;
-				slab->next = handle->slab;
-			}
-			else
-			{
-				slab->next = NULL;
-			}
-
-			slab->prev = NULL;
-			handle->slab = slab;
+			handle->slab->prev = slab;
+			slab->next = handle->slab;
+		}
+		else
+		{
+			slab->next = NULL;
 		}
 
-		memcpy(ptr, &slab->free, sizeof(slab->free));
-		slab->free = ptr;
+		slab->prev = NULL;
+		handle->slab = slab;
 	}
+
+	memcpy(ptr, &slab->free, sizeof(slab->free));
+	slab->free = ptr;
 }
 
 
@@ -1139,23 +1147,6 @@ alloc_free_foreign_internal(
 
 
 void
-alloc_free_slab_internal(
-	void* ptr,
-	alloc_arena_header_t* arena,
-	alloc_slab_header_t* slab
-	)
-{
-	if(attr_likely(atomic_load_acq(&arena->tid) == alloc_tls.tid))
-	{
-		alloc_free_own_internal(ptr, arena, slab);
-		return;
-	}
-
-	alloc_free_foreign_internal(ptr, arena, slab);
-}
-
-
-void
 alloc_free_e(
 	const volatile void* ptr,
 	alloc_t size
@@ -1178,7 +1169,7 @@ alloc_free_e(
 		return;
 	}
 
-	alloc_log_debug("free(): ptr=", ptr, " size=", size);
+	alloc_log_debug("free(): ptr=", ptr, " size=", size, " tid=", alloc_tls.tid);
 
 	alloc_ensure_tls();
 	alloc_huge_maintenance(alloc_tls.numa, alloc_tls.numa_data_timer);
@@ -1196,6 +1187,8 @@ alloc_free_e(
 	ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
 
 	alloc_arena_header_t* arena = alloc_ptr_to_arena(ptr);
+
+#ifndef ALLOC_RELEASE
 	alloc_slab_idx_t slab_idx = (((void*) ptr - arena->data) & handle->slab_mask) >> alloc_consts.slab.small_shift;
 	alloc_slab_header_t* slab_base = (void*) arena + alloc_consts.arena.slab_indexable_offset;
 	alloc_slab_header_t* slab = slab_base + slab_idx;
@@ -1204,18 +1197,39 @@ alloc_free_e(
 	assert_neq(slab->count, 0, alloc_free_trap(ptr, size, handle));
 	assert_eq(slab->handle->alloc_size, handle->alloc_size, alloc_free_trap(ptr, size, handle));
 	assert_eq(slab->handle->alignment, handle->alignment, alloc_free_trap(ptr, size, handle));
+#endif
 
 	alloc_red_zone_check(ptr - alloc_consts.red_zone.size, -1);
 	alloc_red_zone_check(ptr + size, 1);
 
-	if(atomic_load_acq(&arena->tid) == alloc_tls.tid && alloc_tcache_try_push_handle(handle_idx, handle, (void*) ptr))
+	bool is_own = atomic_load_acq(&arena->tid) == alloc_tls.tid;
+
+	if(is_own && alloc_tcache_try_push_handle(handle_idx, handle, (void*) ptr))
 	{
 		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 		ALLOC_VALGRIND_FREE(ptr);
 		return;
 	}
 
-	alloc_free_slab_internal((void*) ptr, arena, slab);
+#ifdef ALLOC_RELEASE
+	alloc_slab_idx_t slab_idx = (((void*) ptr - arena->data) & handle->slab_mask) >> alloc_consts.slab.small_shift;
+	alloc_slab_header_t* slab_base = (void*) arena + alloc_consts.arena.slab_indexable_offset;
+	alloc_slab_header_t* slab = slab_base + slab_idx;
+
+	assert_eq(slab->idx, slab_idx + 1, alloc_free_trap(ptr, size, handle));
+	assert_neq(slab->count, 0, alloc_free_trap(ptr, size, handle));
+	assert_eq(slab->handle->alloc_size, handle->alloc_size, alloc_free_trap(ptr, size, handle));
+	assert_eq(slab->handle->alignment, handle->alignment, alloc_free_trap(ptr, size, handle));
+#endif
+
+	if(is_own)
+	{
+		alloc_free_own_internal((void*) ptr, arena, slab);
+	}
+	else
+	{
+		alloc_free_foreign_internal((void*) ptr, arena, slab);
+	}
 
 	ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 	ALLOC_VALGRIND_FREE(ptr);
@@ -1249,7 +1263,8 @@ alloc_realloc_e(
 {
 	assert_ptr(ptr, old_size);
 
-	alloc_log_debug("realloc(): ptr=", ptr, " old_size=", old_size, " new_size=", new_size, " zero=", zero);
+	alloc_log_debug("realloc(): ptr=", ptr, " old_size=", old_size,
+		" new_size=", new_size, " zero=", zero, " tid=", alloc_tls.tid);
 
 	if(attr_unlikely(!new_size))
 	{

@@ -42,14 +42,14 @@ alloc_huge_global_init(
 	);
 
 
-extern void
+extern attr_cold_fn void
 alloc_huge_reap_due(
 	uint16_t numa,
 	uint64_t now_tsc
 	);
 
 
-extern attr_alloc_fn void*
+extern attr_cold_fn attr_alloc_fn void*
 alloc_huge_alloc(
 	alloc_t size,
 	int zero,
@@ -57,7 +57,7 @@ alloc_huge_alloc(
 	);
 
 
-extern void
+extern attr_cold_fn void
 alloc_huge_free(
 	const volatile void* ptr,
 	alloc_t size,

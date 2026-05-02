@@ -33,21 +33,21 @@ alloc_bootstrap_init(
 	);
 
 
-extern attr_alloc_fn void*
+extern attr_noinline attr_alloc_fn void*
 alloc_bootstrap_alloc(
 	alloc_t size,
 	int zero
 	);
 
 
-extern void
+extern attr_noinline void
 alloc_bootstrap_free(
 	const volatile void* ptr,
 	alloc_t size
 	);
 
 
-extern void*
+extern attr_noinline void*
 alloc_bootstrap_realloc(
 	const volatile void* ptr,
 	alloc_t old_size,
