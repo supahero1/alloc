@@ -163,6 +163,11 @@ def add_metric_with_fallback(rows: Dict[Tuple[str, str], Dict[int, str]], alloca
         value = kv.get(fallback)
     add_metric(rows, allocator_idx, test, metric, value)
 
+def is_unavailable_metric_value(raw: Optional[str]) -> bool:
+    if raw is None:
+        return True
+    text = raw.strip().lower()
+    return (not text) or text in {"na", "n/a", "unavailable", "-", "none"}
 
 def process_bench_line(line: str, allocator_idx: int, rows: Dict[Tuple[str, str], Dict[int, str]], descs: Dict[str, Dict[str, str]], seed_ref: List[str]) -> None:
     kv = parse_kv_tokens(line)
@@ -248,9 +253,12 @@ def process_bench_line(line: str, allocator_idx: int, rows: Dict[Tuple[str, str]
     if typ == "perf":
         section = kv.get("section", "")
         test = f"system / perf / {section}" if section else "system / perf"
-        add_metric_with_fallback(rows, allocator_idx, test, "syscalls", kv, "syscalls")
-        add_metric_with_fallback(rows, allocator_idx, test, "task_clock", kv, "task_clock", "task_clock_ms")
-        add_metric_with_fallback(rows, allocator_idx, test, "page_faults", kv, "page_faults")
+        if not is_unavailable_metric_value(kv.get("syscalls")):
+            add_metric_with_fallback(rows, allocator_idx, test, "syscalls", kv, "syscalls")
+        if (not is_unavailable_metric_value(kv.get("task_clock"))) or (not is_unavailable_metric_value(kv.get("task_clock_ms"))):
+            add_metric_with_fallback(rows, allocator_idx, test, "task_clock", kv, "task_clock", "task_clock_ms")
+        if not is_unavailable_metric_value(kv.get("page_faults")):
+            add_metric_with_fallback(rows, allocator_idx, test, "page_faults", kv, "page_faults")
         return
 
     if typ == "stat":
@@ -649,6 +657,7 @@ def parse_input(input_path: Path) -> ReportData:
 
 def render_report(output_path: Path, input_path: Path, data: ReportData, focus_filters: List[str], ratio_good_max: float, ratio_pair_palette: bool) -> None:
     sections = collect_sections(data.rows, focus_filters)
+    present_metrics = {metric for (_test, metric) in data.rows.keys()}
 
     with output_path.open("w", encoding="utf-8") as out:
         out.write(
@@ -706,6 +715,9 @@ def render_report(output_path: Path, input_path: Path, data: ReportData, focus_f
 
         out.write("<h2>Metric Policy</h2>\n<table>\n<thead><tr><th>Metric</th><th>Unit</th><th>Objective</th><th>Note</th></tr></thead>\n<tbody>\n")
         for metric, (unit, goal, note) in METRIC_SPECS.items():
+            if metric not in present_metrics:
+                continue
+
             if goal == MetricGoal.MIN:
                 objective = "lower is better"
             elif goal == MetricGoal.MAX:

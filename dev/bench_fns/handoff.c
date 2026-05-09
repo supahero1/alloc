@@ -4,7 +4,11 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <sys/wait.h>
+
+#ifndef _WIN32
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
 
 #define XTHREAD_ITERS 200000
 #define XTHREAD_RING_SIZE 64
@@ -356,6 +360,9 @@ bench_section_foreign_free_size(
 	bench_stat_context = BENCH_STAT_CONTEXT_FOREIGN;
 	bench_stat_size = alloc_size;
 
+#ifdef _WIN32
+	bench_foreign_free(alloc_size);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -365,6 +372,7 @@ bench_section_foreign_free_size(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 
 	bench_stat_context = BENCH_STAT_CONTEXT_NONE;
 	bench_stat_size = 0;
@@ -386,6 +394,9 @@ bench_section_handoff_postfree_size(
 	bench_stat_context = BENCH_STAT_CONTEXT_FOREIGN;
 	bench_stat_size = alloc_size;
 
+#ifdef _WIN32
+	bench_handoff_postfree(alloc_size);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -395,6 +406,7 @@ bench_section_handoff_postfree_size(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 
 	bench_stat_context = BENCH_STAT_CONTEXT_NONE;
 	bench_stat_size = 0;

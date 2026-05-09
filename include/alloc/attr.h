@@ -35,7 +35,15 @@
 #define attr_pure_fn attr_attr(pure)
 #define attr_hot_fn attr_attr(hot)
 #define attr_cold_fn attr_attr(cold)
-#define attr_api attr_attr(visibility("default"))
+#ifdef _WIN32
+	#ifdef ALLOC_BUILD_DLL
+		#define attr_api __declspec(dllexport)
+	#else
+		#define attr_api __declspec(dllimport)
+	#endif
+#else
+	#define attr_api attr_attr(visibility("default"))
+#endif
 #define attr_test_fn attr_api attr_used
 
 #define attr_likely(x) __builtin_expect(!!(x), 1)

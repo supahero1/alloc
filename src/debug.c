@@ -17,16 +17,15 @@
 #include <alloc/debug.h>
 #include <alloc/macro.h>
 
-#include <dlfcn.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <execinfo.h>
 
-#if __has_include(<execinfo.h>)
+#if __has_include(<dlfcn.h>) && __has_include(<execinfo.h>)
+	#include <dlfcn.h>
+	#include <execinfo.h>
 	#define DEBUG_STACK_TRACE
-
 #endif
 
 

@@ -30,14 +30,13 @@
 #include <alloc/platform.h>
 #include <alloc/bootstrap.h>
 
-#include <valgrind/valgrind.h>
-
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #if !defined(ALLOC_RELEASE) && __has_include(<valgrind/valgrind.h>)
+	#include <valgrind/valgrind.h>
 	#define ALLOC_RUNNING_ON_VALGRIND() (RUNNING_ON_VALGRIND)
 #else
 	#define ALLOC_RUNNING_ON_VALGRIND() (0)

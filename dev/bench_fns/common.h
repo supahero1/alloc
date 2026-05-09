@@ -63,6 +63,14 @@ bench_free(
 	size_t size
 	);
 
+	
+extern void
+bench_free_aligned(
+	const volatile void* ptr,
+	size_t size,
+	size_t alignment
+	);
+
 
 extern void*
 bench_realloc(

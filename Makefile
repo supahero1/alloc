@@ -2,23 +2,33 @@
 
 UNAME_S := $(shell uname -s)
 
-COMMON_CFLAGS := -march=x86-64-v3 -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE -Iinclude -fPIC -ftls-model=initial-exec
+CSTD ?= gnu23
+
+COMMON_CFLAGS := -std=$(CSTD) -march=x86-64-v3 -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE -Iinclude -fPIC -ftls-model=initial-exec
 COMMON_LDLIBS := -latomic -pthread
 
 ifeq ($(OS), Windows_NT)
 LIB_EXT := dll
-SHARED_LDFLAGS := -shared -Wl,--out-implib,bin/liballoc.lib
+SHARED_LDFLAGS := -shared
+SHARED_IMPLIB_FLAG = -Wl,--out-implib,$(@:.dll=.dll.a)
 RPATH_FLAG :=
+RDYNAMIC_FLAG :=
+COMMON_LDLIBS += -lpsapi
+API_CFLAGS := -DALLOC_BUILD_DLL
 else
 ifeq ($(UNAME_S), Darwin)
 LIB_EXT := dylib
 SHARED_LDFLAGS := -dynamiclib
 RPATH_FLAG := -Wl,-rpath,@loader_path
+RDYNAMIC_FLAG :=
 else
 LIB_EXT := so
 SHARED_LDFLAGS := -shared
 RPATH_FLAG := -Wl,-rpath,'$$ORIGIN'
+RDYNAMIC_FLAG := -rdynamic
 endif
+API_CFLAGS :=
+SHARED_IMPLIB_FLAG :=
 endif
 
 LIB_RELEASE := bin/liballoc_release.$(LIB_EXT)
@@ -28,13 +38,13 @@ LIB_DEV := bin/liballoc_dev.$(LIB_EXT)
 LIB_INSTRUMENTED := bin/liballoc_instrumented.$(LIB_EXT)
 LIB_DEFAULT := bin/liballoc.$(LIB_EXT)
 
-RELEASE_CFLAGS := $(COMMON_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG
-RELEASE_OBJDUMP_CFLAGS := $(COMMON_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG -g3 -ggdb
-DEBUG_CFLAGS := $(COMMON_CFLAGS) -fvisibility=hidden -O1 -fno-lto -g3 -ggdb
-DEV_LIB_CFLAGS := $(COMMON_CFLAGS) -fvisibility=default -O1 -fno-lto -g3 -ggdb -fno-omit-frame-pointer
-INSTRUMENTED_CFLAGS := $(COMMON_CFLAGS) -fvisibility=hidden -O1 -fno-lto -g3 -ggdb -fno-omit-frame-pointer -DNDEBUG
+RELEASE_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG
+RELEASE_OBJDUMP_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG -g3 -ggdb
+DEBUG_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O1 -fno-lto -g3 -ggdb
+DEV_LIB_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=default -O1 -fno-lto -g3 -ggdb -fno-omit-frame-pointer
+INSTRUMENTED_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O1 -fno-lto -g3 -ggdb -fno-omit-frame-pointer -DNDEBUG
 
-DEV_CFLAGS := -march=x86-64-v3 -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE -Iinclude
+DEV_CFLAGS := -std=$(CSTD) -march=x86-64-v3 -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE -Iinclude
 DEV_BFLAGS := $(DEV_CFLAGS) -pthread
 BENCH_EXTRA_CFLAGS ?=
 
@@ -44,6 +54,14 @@ BENCH_FNS_SRC := $(filter-out dev/bench_fns/common.c dev/bench_fns/app_mix.c, $(
 BENCH_BINS_OTHER := $(patsubst dev/bench_fns/%.c,bin/bench_detailed_other_%,$(BENCH_FNS_SRC))
 BENCH_BINS_ALLOC := $(patsubst dev/bench_fns/%.c,bin/bench_detailed_alloc_%,$(BENCH_FNS_SRC))
 BENCH_SUPPORT_OBJS := bin/platform.o bin/threads.o bin/debug.o bin/log.o bin/sync.o
+BENCH_BINS_EXTERNAL :=
+
+ifeq ($(OS), Windows_NT)
+BENCH_BINS_JEMALLOC := $(patsubst dev/bench_fns/%.c,bin/bench_detailed_jemalloc_%,$(BENCH_FNS_SRC))
+BENCH_BINS_MIMALLOC := $(patsubst dev/bench_fns/%.c,bin/bench_detailed_mimalloc_%,$(BENCH_FNS_SRC))
+BENCH_BINS_TBBMALLOC := $(patsubst dev/bench_fns/%.c,bin/bench_detailed_tbbmalloc_%,$(BENCH_FNS_SRC))
+BENCH_BINS_EXTERNAL := $(BENCH_BINS_JEMALLOC) $(BENCH_BINS_MIMALLOC) $(BENCH_BINS_TBBMALLOC)
+endif
 
 .PHONY: all
 all: libs chaos_build build_dev_bench
@@ -67,7 +85,7 @@ liballoc_dev: $(LIB_DEV)
 liballoc_instrumented: $(LIB_INSTRUMENTED)
 
 .PHONY: build_dev_bench
-build_dev_bench: $(BENCH_BINS_OTHER) $(BENCH_BINS_ALLOC)
+build_dev_bench: $(BENCH_BINS_OTHER) $(BENCH_BINS_ALLOC) $(BENCH_BINS_EXTERNAL)
 
 .PHONY: chaos_build
 chaos_build: $(LIB_DEV) $(TEST_CHAOS_BIN)
@@ -89,31 +107,45 @@ clean:
 SRC_FILES := $(filter-out src/windows.c src/linux.c,$(wildcard src/*.c))
 
 $(LIB_RELEASE): $(SRC_FILES) | bin
-	$(CC) $(SHARED_LDFLAGS) $(RELEASE_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
+	$(CC) $(SHARED_LDFLAGS) $(SHARED_IMPLIB_FLAG) $(RELEASE_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
 
 $(LIB_RELEASE_OBJDUMP): $(SRC_FILES) | bin
-	$(CC) $(SHARED_LDFLAGS) $(RELEASE_OBJDUMP_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
+	$(CC) $(SHARED_LDFLAGS) $(SHARED_IMPLIB_FLAG) $(RELEASE_OBJDUMP_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
 
 $(LIB_DEBUG): $(SRC_FILES) | bin
-	$(CC) $(SHARED_LDFLAGS) $(DEBUG_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
+	$(CC) $(SHARED_LDFLAGS) $(SHARED_IMPLIB_FLAG) $(DEBUG_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
 
 $(LIB_DEV): $(SRC_FILES) | bin
-	$(CC) $(SHARED_LDFLAGS) $(DEV_LIB_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
+	$(CC) $(SHARED_LDFLAGS) $(SHARED_IMPLIB_FLAG) $(DEV_LIB_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
 
 $(LIB_INSTRUMENTED): $(SRC_FILES) | bin
-	$(CC) $(SHARED_LDFLAGS) $(INSTRUMENTED_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
+	$(CC) $(SHARED_LDFLAGS) $(SHARED_IMPLIB_FLAG) $(INSTRUMENTED_CFLAGS) -o $@ $^ $(COMMON_LDLIBS)
 
 $(LIB_DEFAULT): $(LIB_RELEASE)
 	cp -f $< $@
 
+ifeq ($(OS), Windows_NT)
+$(TEST_CHAOS_BIN): dev/test_chaos.c $(SRC_FILES) | bin
+	$(CC) $(SRC_FILES) $< -o $@ $(DEV_BFLAGS) -DALLOC_BUILD_DLL $(RDYNAMIC_FLAG) -fno-omit-frame-pointer -fno-lto -g -UNDEBUG $(RPATH_FLAG) $(COMMON_LDLIBS)
+else
 $(TEST_CHAOS_BIN): dev/test_chaos.c $(LIB_DEV) | bin
-	$(CC) $< -o $@ $(DEV_BFLAGS) -rdynamic -fno-omit-frame-pointer -fno-lto -g -UNDEBUG -Lbin -lalloc_dev $(RPATH_FLAG) $(COMMON_LDLIBS)
+	$(CC) $< -o $@ $(DEV_BFLAGS) $(RDYNAMIC_FLAG) -fno-omit-frame-pointer -fno-lto -g -UNDEBUG -Lbin -lalloc_dev $(RPATH_FLAG) $(COMMON_LDLIBS)
+endif
 
 bin/bench_detailed_other_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
 	$(CC) $(filter-out $(LIB_RELEASE), $^) -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) $(COMMON_LDLIBS) -lm
 
 bin/bench_detailed_alloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
 	$(CC) $(filter-out $(LIB_RELEASE), $^) -DDEV_ALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) $(COMMON_LDLIBS) -lm
+
+bin/bench_detailed_jemalloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_JEMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -ljemalloc $(COMMON_LDLIBS) -lm
+
+bin/bench_detailed_mimalloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_MIMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -lmimalloc $(COMMON_LDLIBS) -lm
+
+bin/bench_detailed_tbbmalloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_TBBMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -ltbbmalloc_proxy -ltbbmalloc $(COMMON_LDLIBS) -lm
 
 bin/platform.o: src/platform.c | bin
 	$(CC) $(RELEASE_CFLAGS) -c $< -o $@

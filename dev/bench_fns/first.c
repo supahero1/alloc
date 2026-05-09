@@ -1,7 +1,11 @@
 #include "common.h"
 
 #include <stdio.h>
-#include <sys/wait.h>
+
+#ifndef _WIN32
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
 
 #define FIRST_ALLOC_ITERS 2048
 
@@ -95,6 +99,10 @@ bench_section_first_alloc_size(
 	bench_size_label(alloc_size, size_buf, sizeof(size_buf));
 	snprintf(label, sizeof(label), "first alloc (%s)", size_buf);
 
+#ifdef _WIN32
+	stats_t s = bench_first_alloc(alloc_size);
+	print_stats(label, &s);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -105,6 +113,7 @@ bench_section_first_alloc_size(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 
 	bench_stat_context = BENCH_STAT_CONTEXT_NONE;
 	bench_stat_size = 0;

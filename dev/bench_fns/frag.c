@@ -1,7 +1,11 @@
 #include "common.h"
 
 #include <string.h>
-#include <sys/wait.h>
+
+#ifndef _WIN32
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
 
 #define FRAG_PTRS 8192
 #define FRAG_ROUNDS 4
@@ -135,6 +139,9 @@ bench_section_frag(
 		"single deterministic frag case per process run",
 		"external fragmentation and reuse quality");
 
+#ifdef _WIN32
+	bench_fragmentation(alloc_size);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -144,6 +151,7 @@ bench_section_frag(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 }
 
 

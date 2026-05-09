@@ -1,7 +1,11 @@
 #include "common.h"
 
 #include <stdio.h>
-#include <sys/wait.h>
+
+#ifndef _WIN32
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
 
 #define BENCH_LOCALITY_TARGET_BYTES (32 * 1024 * 1024)
 #define BENCH_LOCALITY_REFERENCE_NODE_SIZE 1024
@@ -92,6 +96,12 @@ bench_section_linked_list_case(
 	bench_stat_context = BENCH_STAT_CONTEXT_LOCALITY;
 	bench_stat_size = node_size;
 
+#ifdef _WIN32
+	char label[64];
+	snprintf(label, sizeof(label), "ll walk %zuB", node_size);
+	stats_t s = bench_linked_list(node_size, node_count, walk_iters);
+	print_stats(label, &s);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -104,6 +114,7 @@ bench_section_linked_list_case(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 
 	bench_stat_context = BENCH_STAT_CONTEXT_NONE;
 	bench_stat_size = 0;

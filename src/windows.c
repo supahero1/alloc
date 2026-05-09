@@ -18,10 +18,9 @@
 #include <alloc/consts.h>
 #include <alloc/platform.h>
 
+#include <io.h>
+#include <stdlib.h>
 #include <windows.h>
-
-
-extern char** _environ;
 
 
 const char**
@@ -180,9 +179,12 @@ attr_alloc_fn void*
 alloc_alloc_virtual_e(
 	alloc_t reserve_size,
 	alloc_t commit_size,
-	uint32_t numa
+	uint32_t numa,
+	int thp
 	)
 {
+	(void) thp;
+
 	if(!reserve_size)
 	{
 		return NULL;
@@ -280,7 +282,7 @@ alloc_realloc_virtual_e(
 
 	if(!ptr)
 	{
-		return alloc_alloc_virtual_e(new_size, new_size, (uint32_t) -1);
+		return alloc_alloc_virtual_e(new_size, new_size, (uint32_t) -1, 0);
 	}
 
 	if(new_size <= old_size)
@@ -288,7 +290,7 @@ alloc_realloc_virtual_e(
 		return (void*) ptr;
 	}
 
-	void* new_ptr = alloc_alloc_virtual_e(new_size, new_size, (uint32_t) -1);
+	void* new_ptr = alloc_alloc_virtual_e(new_size, new_size, (uint32_t) -1, 0);
 	if(!new_ptr)
 	{
 		return NULL;
