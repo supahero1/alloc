@@ -23,6 +23,11 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
+
+#ifdef _WIN32
+	#include <io.h>
+#endif
 
 
 typedef enum alloc_log_color
@@ -133,6 +138,21 @@ alloc_do_log(
 
 	va_list args;
 	va_start(args, format);
+#ifdef _WIN32
+		char msg[4096];
+		int len = vsnprintf(msg, sizeof(msg), final_format, args);
+		if(len > 0)
+		{
+			size_t write_len = strlen(msg);
+			if((size_t) len < write_len)
+			{
+				write_len = len;
+			}
+
+			_write(fd, msg, write_len);
+		}
+#else
 		vdprintf(fd, final_format, args);
+#endif
 	va_end(args);
 }

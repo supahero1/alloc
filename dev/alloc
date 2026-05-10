@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import platform
 from pathlib import Path
 from typing import Any, Dict, IO, List, Optional, Set, Tuple
 
@@ -39,6 +40,9 @@ DEFAULT_TXT: Path = BIN_DIR / "log_detailed.txt"
 DEFAULT_HTML: Path = BIN_DIR / "log_detailed.html"
 BENCH_LOG_TAG: str = "[bench]"
 BENCH_BINARY_NAMES: List[str] = ["rss", "reclaim", "frag", "ops", "first", "handoff", "app_mt", "app_st", "locality"]
+IS_WINDOWS: bool = (os.name == "nt") or (os.environ.get("OS") == "Windows_NT") or (platform.system().lower().startswith("mingw"))
+EXE_SUFFIX: str = ".exe" if IS_WINDOWS else ""
+TIME_CMD: str = "time" if IS_WINDOWS else "/usr/bin/time"
 
 _PERF_EVENTS: Optional[str] = None
 _SYSCALLS_AVAILABLE: bool = False
@@ -78,6 +82,10 @@ def init_perf_events() -> Tuple[str, bool]:
 	global _PERF_EVENTS, _SYSCALLS_AVAILABLE
 	if _PERF_EVENTS is not None:
 		return _PERF_EVENTS, _SYSCALLS_AVAILABLE
+	if IS_WINDOWS:
+		_PERF_EVENTS = ""
+		_SYSCALLS_AVAILABLE = False
+		return _PERF_EVENTS, _SYSCALLS_AVAILABLE
 	_PERF_EVENTS = "task-clock,page-faults"
 	for ev in ["raw_syscalls:sys_enter", "syscalls:sys_enter_mmap", "syscalls:sys_enter_openat"]:
 		res: subprocess.CompletedProcess = subprocess.run(["perf", "stat", "-x,", "-e", ev, "--", "/bin/true"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
@@ -105,10 +113,14 @@ def ensure_runs_dir() -> None:
 	COMPARE_DIR.mkdir(parents=True, exist_ok=True)
 
 def ensure_bench_bins() -> None:
+	prefixes: List[str] = ["bench_detailed_other", "bench_detailed_alloc"]
+	if IS_WINDOWS:
+		prefixes.extend(["bench_detailed_jemalloc", "bench_detailed_mimalloc", "bench_detailed_tbbmalloc"])
+
 	missing: List[Path] = []
-	for prefix in ["bench_detailed_other", "bench_detailed_alloc"]:
+	for prefix in prefixes:
 		for name in BENCH_BINARY_NAMES:
-			path: Path = BIN_DIR / f"{prefix}_{name}"
+			path: Path = BIN_DIR / f"{prefix}_{name}{EXE_SUFFIX}"
 			if not path.is_file():
 				missing.append(path)
 
@@ -117,9 +129,9 @@ def ensure_bench_bins() -> None:
 		subprocess.run(["make", "-C", str(ROOT_DIR), "build_dev_bench"], check=False, stdout=subprocess.DEVNULL)
 
 	missing = []
-	for prefix in ["bench_detailed_other", "bench_detailed_alloc"]:
+	for prefix in prefixes:
 		for name in BENCH_BINARY_NAMES:
-			path = BIN_DIR / f"{prefix}_{name}"
+			path = BIN_DIR / f"{prefix}_{name}{EXE_SUFFIX}"
 			if not path.is_file():
 				missing.append(path)
 
@@ -201,10 +213,10 @@ def parse_size_token(size_str: str) -> int:
 
 def append_static_desc_headers(txt_file: Path) -> None:
 	_BENCH_LOG_DEDUPE.clear()
-	lines: List[str] = [
-		"BENCH|type=desc|test=system / time|what=process runtime split|measures=user sys elapsed maxrss minflt|method=GNU time around each isolated section run|detects=runtime split and memory-fault pressure per section",
-		"BENCH|type=desc|test=system / perf|what=counter snapshot for benchmark process|measures=task_clock page_faults syscalls|method=perf stat around each isolated section run with strace for syscall count|detects=cpu-time and syscall pressure per section",
-	]
+	lines: List[str] = []
+	lines.append("BENCH|type=desc|test=system / time|what=process runtime split|measures=user sys elapsed maxrss minflt|method=GNU time around each isolated section run|detects=runtime split and memory-fault pressure per section")
+	if not IS_WINDOWS:
+		lines.append("BENCH|type=desc|test=system / perf|what=counter snapshot for benchmark process|measures=task_clock page_faults syscalls|method=perf stat around each isolated section run with strace for syscall count|detects=cpu-time and syscall pressure per section")
 	with open(txt_file, "w") as f:
 		for line in lines:
 			_BENCH_LOG_DEDUPE.add(line)
@@ -283,7 +295,7 @@ def run_bench_worker(log_file: Path, alloc_name: str, section: str, run_bin_pref
 	if not binary_name:
 		return
 
-	run_bin: Path = Path(f"{run_bin_prefix}_{binary_name}")
+	run_bin: Path = Path(f"{run_bin_prefix}_{binary_name}{EXE_SUFFIX}")
 	run_single_bench(log_file, run_bin, args, extra_env, perf_events, time_format, section_field, syscalls_available)
 
 def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: Dict[str, str], perf_events: str, time_format: str, section_field: str, syscalls_available: bool) -> None:
@@ -293,7 +305,10 @@ def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: 
 		perf_file: Path = tmp_path / "perf.txt"
 		strace_file: Path = tmp_path / "strace.txt"
 
-		cmd: List[str] = ["/usr/bin/time", "-f", time_format, "-o", str(time_file), "perf", "stat", "-x,", "-o", str(perf_file), "-e", perf_events, "--", str(run_bin)]
+		if IS_WINDOWS:
+			cmd: List[str] = [TIME_CMD, "-f", time_format, "-o", str(time_file), str(run_bin)]
+		else:
+			cmd = [TIME_CMD, "-f", time_format, "-o", str(time_file), "perf", "stat", "-x,", "-o", str(perf_file), "-e", perf_events, "--", str(run_bin)]
 		cmd.extend(args)
 
 		env: Dict[str, str] = os.environ.copy()
@@ -310,7 +325,7 @@ def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: 
 		task_clock: str = "na"
 		page_faults: str = "na"
 
-		if not syscalls_available:
+		if not IS_WINDOWS and not syscalls_available:
 			syscalls = "unavailable"
 
 		if perf_file.is_file() and perf_file.stat().st_size > 0:
@@ -325,7 +340,7 @@ def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: 
 					elif "page-faults" in event:
 						page_faults = val
 
-		if not syscalls_available and shutil.which("strace"):
+		if not IS_WINDOWS and not syscalls_available and shutil.which("strace"):
 			strace_cmd: List[str] = ["strace", "-f", "-qq", "-c", "-o", str(strace_file), "--", str(run_bin)]
 			strace_cmd.extend(args)
 			subprocess.run(strace_cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -336,8 +351,9 @@ def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: 
 						if len(parts) >= 3:
 							syscalls = parts[-2]
 
-		with open(log_file, "a") as f_out:
-			f_out.write(f"BENCH|type=perf{section_field}|syscalls={syscalls}|task_clock={task_clock}|page_faults={page_faults}\n\n")
+		if not IS_WINDOWS:
+			with open(log_file, "a") as f_out:
+				f_out.write(f"BENCH|type=perf{section_field}|syscalls={syscalls}|task_clock={task_clock}|page_faults={page_faults}\n\n")
 
 def run_sections_for_allocator(allocator: str, run_bin_prefix: Path, extra_env: Dict[str, str], sections: List[str], seed: str) -> None:
 	with open(DEFAULT_TXT, "a") as f:
@@ -347,6 +363,15 @@ def run_sections_for_allocator(allocator: str, run_bin_prefix: Path, extra_env: 
 		run_bench_worker(DEFAULT_TXT, allocator, sec, run_bin_prefix, env, seed)
 
 def find_lib(name: str) -> Optional[str]:
+	if IS_WINDOWS:
+		for raw_dir in os.environ.get("PATH", "").split(os.pathsep):
+			if not raw_dir:
+				continue
+			candidate = Path(raw_dir) / name
+			if candidate.is_file():
+				return str(candidate)
+		return None
+
 	try:
 		res: subprocess.CompletedProcess = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True)
 		for line in res.stdout.splitlines():
@@ -410,17 +435,67 @@ def cmd_chaos(args: argparse.Namespace) -> None:
 	status_done()
 
 def cmd_dump(args: argparse.Namespace) -> None:
-	lib_path: str = args.lib if args.lib else str(BIN_DIR / "liballoc_release_objdump.so")
+	if IS_WINDOWS:
+		default_lib: Path = BIN_DIR / "liballoc_release_objdump.dll"
+	elif sys.platform == "darwin":
+		default_lib = BIN_DIR / "liballoc_release_objdump.dylib"
+	else:
+		default_lib = BIN_DIR / "liballoc_release_objdump.so"
+
+	lib_path: str = args.lib if args.lib else str(default_lib)
 	if not shutil.which("objdump"):
 		sys.exit("objdump not found in PATH")
-	if Path(lib_path).resolve() == (BIN_DIR / "liballoc_release_objdump.so").resolve():
+	if Path(lib_path).resolve() == default_lib.resolve():
 		status_line("building: liballoc_release_objdump")
 		subprocess.run(["make", "-C", str(ROOT_DIR), "liballoc_release_objdump"], check=False, stdout=subprocess.DEVNULL)
 	if not Path(lib_path).is_file():
 		status_done()
 		sys.exit(f"library not found: {lib_path}")
+
+	start_addr: Optional[int] = None
+	stop_addr: Optional[int] = None
+	try:
+		nm_res = subprocess.run(["nm", "-n", "--defined-only", lib_path], capture_output=True, text=True)
+		if nm_res.returncode == 0:
+			symbols: List[Tuple[int, str]] = []
+			for line in nm_res.stdout.splitlines():
+				parts = line.split()
+				if len(parts) < 3:
+					continue
+				sym_type = parts[1]
+				name = parts[-1]
+				# Use only text symbols as function boundaries; local labels can sit inside
+				# instructions and would truncate objdump output mid-instruction.
+				if sym_type not in {"t", "T", "w", "W"}:
+					continue
+				if name.startswith("."):
+					continue
+				try:
+					addr = int(parts[0], 16)
+				except ValueError:
+					continue
+				symbols.append((addr, name))
+
+			for idx, (addr, name) in enumerate(symbols):
+				if name == args.function:
+					start_addr = addr
+					for j in range(idx + 1, len(symbols)):
+						next_addr = symbols[j][0]
+						if next_addr > addr:
+							stop_addr = next_addr
+							break
+					break
+	except Exception:
+		pass
+
 	status_line(f"running: objdump function={args.function}")
-	status_run(["objdump", "-d", "-C", "-M", "intel", "--line-numbers", f"--disassemble={args.function}", lib_path])
+	objdump_cmd: List[str] = ["objdump", "-d", "-C", "-M", "intel", "--line-numbers"]
+	if start_addr is not None:
+		objdump_cmd.append(f"--start-address=0x{start_addr:x}")
+	if stop_addr is not None:
+		objdump_cmd.append(f"--stop-address=0x{stop_addr:x}")
+	objdump_cmd.extend([f"--disassemble={args.function}", lib_path])
+	status_run(objdump_cmd)
 	status_done()
 
 def cmd_install(args: argparse.Namespace) -> None:
@@ -471,10 +546,10 @@ def cmd_bench_run(args: argparse.Namespace) -> None:
 	ensure_runs_dir()
 	ensure_bench_bins()
 	ensure_report_script()
-	if not shutil.which("perf"):
+	if not IS_WINDOWS and not shutil.which("perf"):
 		sys.exit("perf is required but not found in PATH")
-	if not shutil.which("/usr/bin/time"):
-		sys.exit("/usr/bin/time is required but not found")
+	if not shutil.which(TIME_CMD):
+		sys.exit(f"{TIME_CMD} is required but not found")
 
 	bench_sections: List[str] = [s.strip() for s in args.only.replace(",", " ").split() if s.strip()] if args.only else default_sections()
 	if not bench_sections:
@@ -487,31 +562,51 @@ def cmd_bench_run(args: argparse.Namespace) -> None:
 	seed: str = os.environ.get("BENCH_SEED", str(random.randint(1, 2**31 - 1)))
 	other_bin: Path = BIN_DIR / "bench_detailed_other"
 	alloc_bin: Path = BIN_DIR / "bench_detailed_alloc"
+	default_allocator_name: str = "system" if IS_WINDOWS else "pt2malloc"
 
 	if not args.alloc_only:
-		run_sections_for_allocator("pt2malloc", other_bin, {}, bench_sections, seed)
+		run_sections_for_allocator(default_allocator_name, other_bin, {}, bench_sections, seed)
 
-		jemalloc: Optional[str] = find_lib("libjemalloc.so")
-		if jemalloc:
-			run_sections_for_allocator("jemalloc", other_bin, {"LD_PRELOAD": jemalloc}, bench_sections, seed)
+		if IS_WINDOWS:
+			if find_lib("libjemalloc.dll"):
+				run_sections_for_allocator("jemalloc", BIN_DIR / "bench_detailed_jemalloc", {}, bench_sections, seed)
+			else:
+				with open(DEFAULT_TXT, "a") as f:
+					f.write("BENCH|type=meta|allocator=jemalloc|status=skipped|reason=unavailable\n\n")
 
-		mimalloc: Optional[str] = find_lib("libmimalloc.so")
-		if mimalloc:
-			run_sections_for_allocator("mimalloc", other_bin, {"LD_PRELOAD": mimalloc}, bench_sections, seed)
+			if find_lib("libmimalloc.dll"):
+				run_sections_for_allocator("mimalloc", BIN_DIR / "bench_detailed_mimalloc", {}, bench_sections, seed)
+			else:
+				with open(DEFAULT_TXT, "a") as f:
+					f.write("BENCH|type=meta|allocator=mimalloc|status=skipped|reason=unavailable\n\n")
 
-		tcmalloc: Optional[str] = find_lib("libtcmalloc_minimal.so")
-		if tcmalloc:
-			run_sections_for_allocator("tcmalloc", other_bin, {"LD_PRELOAD": tcmalloc}, bench_sections, seed)
-
-		tbb_proxy: Optional[str] = find_lib("libtbbmalloc_proxy.so")
-		tbb_base: Optional[str] = find_lib("libtbbmalloc.so")
-		tbb_preload: Optional[str] = tbb_proxy if tbb_proxy else tbb_base
-		if tbb_preload and subprocess.run(["/bin/true"], env={"LD_PRELOAD": tbb_preload}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-			run_sections_for_allocator("tbbmalloc", other_bin, {"LD_PRELOAD": tbb_preload}, bench_sections, seed)
+			if find_lib("libtbbmalloc_proxy.dll") and find_lib("libtbbmalloc.dll"):
+				run_sections_for_allocator("tbbmalloc", BIN_DIR / "bench_detailed_tbbmalloc", {}, bench_sections, seed)
+			else:
+				with open(DEFAULT_TXT, "a") as f:
+					f.write("BENCH|type=meta|allocator=tbbmalloc|status=skipped|reason=unavailable\n\n")
 		else:
-			print("tbbmalloc preload unavailable, skipping", file=sys.stderr)
-			with open(DEFAULT_TXT, "a") as f:
-				f.write("BENCH|type=meta|allocator=tbbmalloc|status=skipped|reason=preload_unavailable\n\n")
+			jemalloc: Optional[str] = find_lib("libjemalloc.so")
+			if jemalloc:
+				run_sections_for_allocator("jemalloc", other_bin, {"LD_PRELOAD": jemalloc}, bench_sections, seed)
+
+			mimalloc: Optional[str] = find_lib("libmimalloc.so")
+			if mimalloc:
+				run_sections_for_allocator("mimalloc", other_bin, {"LD_PRELOAD": mimalloc}, bench_sections, seed)
+
+			tcmalloc: Optional[str] = find_lib("libtcmalloc_minimal.so")
+			if tcmalloc:
+				run_sections_for_allocator("tcmalloc", other_bin, {"LD_PRELOAD": tcmalloc}, bench_sections, seed)
+
+			tbb_proxy: Optional[str] = find_lib("libtbbmalloc_proxy.so")
+			tbb_base: Optional[str] = find_lib("libtbbmalloc.so")
+			tbb_preload: Optional[str] = tbb_proxy if tbb_proxy else tbb_base
+			if tbb_preload and subprocess.run(["/bin/true"], env={"LD_PRELOAD": tbb_preload}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+				run_sections_for_allocator("tbbmalloc", other_bin, {"LD_PRELOAD": tbb_preload}, bench_sections, seed)
+			else:
+				print("tbbmalloc preload unavailable, skipping", file=sys.stderr)
+				with open(DEFAULT_TXT, "a") as f:
+					f.write("BENCH|type=meta|allocator=tbbmalloc|status=skipped|reason=preload_unavailable\n\n")
 
 	alloc_env: Dict[str, str] = {
 		"LD_LIBRARY_PATH": f"{BIN_DIR}:{os.environ.get('LD_LIBRARY_PATH', '')}",

@@ -1253,6 +1253,67 @@ alloc_realloc_trap(
 }
 
 
+attr_cold_fn void*
+alloc_realloc_e_virtual(
+	const volatile void* ptr,
+	alloc_t old_size,
+	alloc_t new_size,
+	int zero
+	)
+{
+	void* new_ptr = alloc_realloc_virtual_e(ptr, old_size, new_size);
+	if(attr_unlikely(!new_ptr))
+	{
+		return NULL;
+	}
+
+	alloc_report_virtual_free(old_size);
+	alloc_report_virtual_alloc(new_size);
+
+	if(new_size > old_size && zero)
+	{
+		alloc_t to = MACRO_MIN(new_size, MACRO_ALIGN_UP(old_size, alloc_consts.page.size));
+		if(to != old_size)
+		{
+			memset((void*) new_ptr + old_size, 0, to - old_size);
+		}
+	}
+
+	ALLOC_VALGRIND_FREE(ptr);
+	ALLOC_VALGRIND_ALLOC(new_ptr, new_size, zero);
+	ALLOC_VALGRIND_DEFINE(new_ptr, old_size);
+
+	return new_ptr;
+}
+
+
+attr_noinline void*
+alloc_realloc_e_fresh(
+	const volatile void* ptr,
+	alloc_t old_size,
+	alloc_t new_size,
+	int zero
+	)
+{
+	void* new_ptr = alloc_alloc_e(new_size, 0);
+	if(attr_unlikely(!new_ptr))
+	{
+		return NULL;
+	}
+
+	memcpy(new_ptr, (void*) ptr, MACRO_MIN(old_size, new_size));
+
+	if(new_size > old_size && zero)
+	{
+		memset((void*) new_ptr + old_size, 0, new_size - old_size);
+	}
+
+	alloc_free_e(ptr, old_size);
+
+	return new_ptr;
+}
+
+
 void*
 alloc_realloc_e(
 	const volatile void* ptr,
@@ -1277,11 +1338,21 @@ alloc_realloc_e(
 		return alloc_alloc_e(new_size, zero);
 	}
 
+	if(attr_unlikely(alloc_is_bootstrap_ptr(ptr)))
+	{
+		if(attr_unlikely(atomic_load_acq(&alloc_consts.state) < ALLOC_CONSTS_STATE_INITIALIZED))
+		{
+			return alloc_bootstrap_realloc(ptr, old_size, new_size, zero);
+		}
+
+		return alloc_realloc_e_fresh(ptr, old_size, new_size, zero);
+	}
+
 	int old_virtual = alloc_is_size_virtual(old_size);
 	int new_virtual = alloc_is_size_virtual(new_size);
 
 #ifndef ALLOC_RELEASE
-	if(!old_virtual && !alloc_is_bootstrap_ptr(ptr))
+	if(!old_virtual)
 	{
 		alloc_handle_idx_t old_handle_idx = alloc_get_handle_idx(old_size);
 		const alloc_handle_t* old_handle = alloc_tls.handles + old_handle_idx;
@@ -1302,42 +1373,10 @@ alloc_realloc_e(
 	{
 		if(old_virtual && new_virtual)
 		{
-			void* new_ptr = alloc_realloc_virtual_e(ptr, old_size, new_size);
-			if(attr_unlikely(!new_ptr))
-			{
-				return NULL;
-			}
-
-			alloc_report_virtual_free(old_size);
-			alloc_report_virtual_alloc(new_size);
-
-			if(new_size > old_size && zero)
-			{
-				alloc_t to = MACRO_MIN(new_size, MACRO_ALIGN_UP(old_size, alloc_consts.page.size));
-				if(to != old_size)
-				{
-					memset((void*) new_ptr + old_size, 0, to - old_size);
-				}
-			}
-
-			ALLOC_VALGRIND_FREE(ptr);
-			ALLOC_VALGRIND_ALLOC(new_ptr, new_size, zero);
-			ALLOC_VALGRIND_DEFINE(new_ptr, old_size);
-
-			return new_ptr;
+			return alloc_realloc_e_virtual(ptr, old_size, new_size, zero);
 		}
 
-		goto goto_fresh_realloc;
-	}
-
-	if(attr_unlikely(alloc_is_bootstrap_ptr(ptr)))
-	{
-		if(attr_unlikely(atomic_load_acq(&alloc_consts.state) < ALLOC_CONSTS_STATE_INITIALIZED))
-		{
-			return alloc_bootstrap_realloc(ptr, old_size, new_size, zero);
-		}
-
-		goto goto_fresh_realloc;
+		return alloc_realloc_e_fresh(ptr, old_size, new_size, zero);
 	}
 
 	alloc_handle_idx_t old_handle_idx = alloc_get_handle_idx(old_size);
@@ -1363,24 +1402,7 @@ alloc_realloc_e(
 		return (void*) ptr;
 	}
 
-goto_fresh_realloc:
-
-	void* new_ptr = alloc_alloc_e(new_size, 0);
-	if(attr_unlikely(!new_ptr))
-	{
-		return NULL;
-	}
-
-	memcpy(new_ptr, (void*) ptr, MACRO_MIN(old_size, new_size));
-
-	if(new_size > old_size && zero)
-	{
-		memset((void*) new_ptr + old_size, 0, new_size - old_size);
-	}
-
-	alloc_free_e(ptr, old_size);
-
-	return new_ptr;
+	return alloc_realloc_e_fresh(ptr, old_size, new_size, zero);
 }
 
 

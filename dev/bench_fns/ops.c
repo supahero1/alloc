@@ -1,7 +1,11 @@
 #include "common.h"
 
 #include <string.h>
-#include <sys/wait.h>
+
+#ifndef _WIN32
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
 
 #define BENCH_ITERS 500000
 #define BENCH_MEM_CAP (256 * 1024 * 1024)
@@ -95,7 +99,7 @@ bench_aligned_malloc(
 
 	for(int i = 0; i < n; ++i)
 	{
-		bench_free(ptrs[i], alloc_size);
+		bench_free_aligned(ptrs[i], alloc_size, 64);
 	}
 
 	stats_t s = compute_stats(samples, n);
@@ -122,7 +126,7 @@ bench_aligned_free(
 	for(int i = 0; i < n; ++i)
 	{
 		uint64_t t0 = get_ns();
-		bench_free(ptrs[i], alloc_size);
+		bench_free_aligned(ptrs[i], alloc_size, 64);
 		uint64_t t1 = get_ns();
 		samples[i] = t1 - t0;
 	}
@@ -428,6 +432,11 @@ bench_run_stats_case_for_size(
 	)
 {
 	bench_stat_size = alloc_size;
+	
+#ifdef _WIN32
+	stats_t s = fn(alloc_size);
+	print_stats(label, &s);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -438,6 +447,7 @@ bench_run_stats_case_for_size(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 }
 
 

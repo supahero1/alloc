@@ -1,7 +1,11 @@
 #include "common.h"
 
 #include <string.h>
-#include <sys/wait.h>
+
+#ifndef _WIN32
+	#include <sys/wait.h>
+	#include <unistd.h>
+#endif
 
 #define RSS_PTRS 4096
 #define RSS_OPS 200000
@@ -119,6 +123,9 @@ bench_section_rss(
 		"single deterministic rss case per process run",
 		"retention purge and THP behavior");
 
+#ifdef _WIN32
+	bench_rss(alloc_size);
+#else
 	pid_t pid = fork();
 	if(!pid)
 	{
@@ -128,6 +135,7 @@ bench_section_rss(
 
 	int status;
 	waitpid(pid, &status, 0);
+#endif
 }
 
 

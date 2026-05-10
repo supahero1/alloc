@@ -4,10 +4,22 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef _WIN32
+	#include <malloc.h>
+	#include <windows.h>
+	#include <psapi.h>
+#endif
+
 #include <alloc/platform.h>
 
 #ifdef DEV_ALLOC
 	#include <alloc/base.h>
+#elif defined(BENCH_JEMALLOC)
+	#include <jemalloc/jemalloc.h>
+#elif defined(BENCH_MIMALLOC)
+	#include <mimalloc.h>
+#elif defined(BENCH_TBBMALLOC)
+	#include <oneapi/tbb/scalable_allocator.h>
 #endif
 
 
@@ -37,6 +49,17 @@ uint32_t bench_seed_base;
 		)
 	{
 		alloc_free(ptr, size);
+	}
+
+	
+	void
+	bench_free_aligned(
+		const volatile void* ptr,
+		size_t size,
+		size_t alignment
+		)
+	{
+		alloc_free_aligned_e(ptr, size, alignment);
 	}
 
 
@@ -72,12 +95,35 @@ uint32_t bench_seed_base;
 		int zero
 		)
 	{
+#if defined(BENCH_JEMALLOC)
+		if(!zero)
+		{
+			return je_malloc(size);
+		}
+
+		return je_calloc(1, size);
+#elif defined(BENCH_MIMALLOC)
+		if(!zero)
+		{
+			return mi_malloc(size);
+		}
+
+		return mi_calloc(1, size);
+#elif defined(BENCH_TBBMALLOC)
+		if(!zero)
+		{
+			return scalable_malloc(size);
+		}
+
+		return scalable_calloc(1, size);
+#else
 		if(!zero)
 		{
 			return malloc(size);
 		}
 
 		return calloc(1, size);
+#endif
 	}
 
 
@@ -89,7 +135,41 @@ uint32_t bench_seed_base;
 	{
 		(void) size;
 
+#if defined(BENCH_JEMALLOC)
+		je_free((void*) ptr);
+#elif defined(BENCH_MIMALLOC)
+		mi_free((void*) ptr);
+#elif defined(BENCH_TBBMALLOC)
+		scalable_free((void*) ptr);
+#else
 		free((void*) ptr);
+#endif
+	}
+
+	void
+	bench_free_aligned(
+		const volatile void* ptr,
+		size_t size,
+		size_t alignment
+		)
+	{
+		(void) size;
+
+#if defined(BENCH_JEMALLOC)
+		(void) alignment;
+		je_free((void*) ptr);
+#elif defined(BENCH_MIMALLOC)
+		mi_free_aligned((void*) ptr, alignment);
+#elif defined(BENCH_TBBMALLOC)
+		(void) alignment;
+		scalable_aligned_free((void*) ptr);
+#elif defined(_WIN32)
+		(void) alignment;
+		_aligned_free((void*) ptr);
+#else
+		(void) alignment;
+		free((void*) ptr);
+#endif
 	}
 
 
@@ -101,7 +181,15 @@ uint32_t bench_seed_base;
 		int zero
 		)
 	{
+#if defined(BENCH_JEMALLOC)
+		void* new_ptr = je_realloc((void*) ptr, new_size);
+#elif defined(BENCH_MIMALLOC)
+		void* new_ptr = mi_realloc((void*) ptr, new_size);
+#elif defined(BENCH_TBBMALLOC)
+		void* new_ptr = scalable_realloc((void*) ptr, new_size);
+#else
 		void* new_ptr = realloc((void*) ptr, new_size);
+#endif
 		if(!new_ptr)
 		{
 			return NULL;
@@ -123,11 +211,25 @@ uint32_t bench_seed_base;
 		int zero
 		)
 	{
+#if defined(BENCH_JEMALLOC)
+		void* ptr = je_aligned_alloc(alignment, MACRO_ALIGN_UP(size, alignment - 1));
+#elif defined(BENCH_MIMALLOC)
+		void* ptr = mi_malloc_aligned(size, alignment);
+#elif defined(BENCH_TBBMALLOC)
+		void* ptr = scalable_aligned_malloc(size, alignment);
+#elif defined(_WIN32)
+		void* ptr = _aligned_malloc(size, alignment);
+		if(!ptr)
+		{
+			return NULL;
+		}
+#else
 		void* ptr = NULL;
 		if(posix_memalign(&ptr, alignment, size))
 		{
 			return NULL;
 		}
+#endif
 
 		if(zero)
 		{
@@ -323,6 +425,15 @@ get_rss_kb(
 	void
 	)
 {
+#ifdef _WIN32
+	PROCESS_MEMORY_COUNTERS_EX pmc;
+	if(!GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*) &pmc, sizeof(pmc)))
+	{
+		return -1;
+	}
+
+	return (long) (pmc.WorkingSetSize / 1024);
+#else
 	FILE* f = fopen("/proc/self/statm", "r");
 	if(!f)
 	{
@@ -338,6 +449,7 @@ get_rss_kb(
 
 	fclose(f);
 	return rss * 4;
+#endif
 }
 
 
@@ -346,6 +458,9 @@ get_anon_hugepages_kb(
 	void
 	)
 {
+#ifdef _WIN32
+	return 0;
+#else
 	FILE* f = fopen("/proc/self/smaps_rollup", "r");
 	if(!f)
 	{
@@ -359,6 +474,7 @@ get_anon_hugepages_kb(
 
 	fclose(f);
 	return val;
+#endif
 }
 
 

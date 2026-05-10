@@ -9,6 +9,39 @@
 #include <signal.h>
 #include <stdlib.h>
 
+#ifdef _WIN32
+	#include <process.h>
+	#include <windows.h>
+#else
+	#include <unistd.h>
+#endif
+
+#ifdef _WIN32
+
+
+	static uint32_t
+	chaos_rand_r(
+		uint32_t* seed
+		)
+	{
+		*seed = *seed * 1103515245u + 12345u;
+		return (*seed >> 16) & 0x7fff;
+	}
+
+	static void
+	chaos_usleep(
+		uint32_t us
+		)
+	{
+		Sleep((us + 999) / 1000);
+	}
+
+	#define rand_r chaos_rand_r
+	#define usleep chaos_usleep
+	#define getpid _getpid
+
+#endif
+
 #define CHAOS_LOG_TAG "[alloc/chaos]"
 #define chaos_log_info(...) alloc_do_custom_log_tagged_info(STDERR_FILENO, CHAOS_LOG_TAG, __VA_ARGS__)
 #define chaos_log_error(...) alloc_do_custom_log_tagged_error(STDERR_FILENO, CHAOS_LOG_TAG, __VA_ARGS__)
@@ -848,7 +881,9 @@ main(
 	signal(SIGSEGV, chaos_crash_signal_handler);
 	signal(SIGABRT, chaos_crash_signal_handler);
 	signal(SIGILL, chaos_crash_signal_handler);
+#ifdef SIGBUS
 	signal(SIGBUS, chaos_crash_signal_handler);
+#endif
 	signal(SIGFPE, chaos_crash_signal_handler);
 
 	alloc_config_t cfg =
