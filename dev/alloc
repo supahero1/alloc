@@ -455,18 +455,26 @@ def cmd_dump(args: argparse.Namespace) -> None:
 	start_addr: Optional[int] = None
 	stop_addr: Optional[int] = None
 	try:
-		nm_res = subprocess.run(["nm", "-n", lib_path], capture_output=True, text=True)
+		nm_res = subprocess.run(["nm", "-n", "--defined-only", lib_path], capture_output=True, text=True)
 		if nm_res.returncode == 0:
 			symbols: List[Tuple[int, str]] = []
 			for line in nm_res.stdout.splitlines():
 				parts = line.split()
 				if len(parts) < 3:
 					continue
+				sym_type = parts[1]
+				name = parts[-1]
+				# Use only text symbols as function boundaries; local labels can sit inside
+				# instructions and would truncate objdump output mid-instruction.
+				if sym_type not in {"t", "T", "w", "W"}:
+					continue
+				if name.startswith("."):
+					continue
 				try:
 					addr = int(parts[0], 16)
 				except ValueError:
 					continue
-				symbols.append((addr, parts[-1]))
+				symbols.append((addr, name))
 
 			for idx, (addr, name) in enumerate(symbols):
 				if name == args.function:
