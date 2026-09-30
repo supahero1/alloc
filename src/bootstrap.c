@@ -768,6 +768,11 @@ alloc_bootstrap_realloc(
 	if(ptr && ptr == new_ptr)
 	{
 		ALLOC_VALGRIND_RESIZE(ptr, old_size, new_size);
+
+		if(new_size > old_size && zero)
+		{
+			ALLOC_VALGRIND_DEFINE((void*) ptr + old_size, new_size - old_size);
+		}
 	}
 	else if(new_ptr)
 	{
@@ -775,6 +780,7 @@ alloc_bootstrap_realloc(
 
 		if(ptr)
 		{
+			ALLOC_VALGRIND_DEFINE(new_ptr, MACRO_MIN(old_size, new_size));
 			ALLOC_VALGRIND_FREE(ptr);
 		}
 	}

@@ -989,8 +989,11 @@ alloc_alloc_e(
 
 	if(attr_unlikely(alloc_is_size_virtual(size)))
 	{
-		void* ptr = alloc_huge_alloc(size, zero, alloc_tls.numa);
+		ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+			void* ptr = alloc_huge_alloc(size, zero, alloc_tls.numa);
+		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 		ALLOC_VALGRIND_ALLOC(ptr, size, zero);
+
 		return ptr;
 	}
 
@@ -999,23 +1002,14 @@ alloc_alloc_e(
 	alloc_handle_idx_t handle_idx = alloc_get_handle_idx(size);
 	const alloc_handle_t* handle = alloc_tls.handles + handle_idx;
 
-	void* tcache_ptr = alloc_tcache_try_pop_handle(handle_idx, handle, size, zero);
-	if(tcache_ptr)
-	{
-		ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
-
-		alloc_red_zone_init(tcache_ptr - alloc_consts.red_zone.size);
-		alloc_red_zone_init(tcache_ptr + size);
-
-		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
-		ALLOC_VALGRIND_ALLOC(tcache_ptr, size, zero);
-
-		return tcache_ptr;
-	}
-
 	ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
 
-	void* ptr = alloc_alloc_slab_internal((void*) handle, size, zero);
+	void* ptr = alloc_tcache_try_pop_handle(handle_idx, handle, size, zero);
+	if(!ptr)
+	{
+		ptr = alloc_alloc_slab_internal((void*) handle, size, zero);
+	}
+
 	if(ptr)
 	{
 		alloc_red_zone_init(ptr - alloc_consts.red_zone.size);
@@ -1275,7 +1269,9 @@ alloc_realloc_e_virtual(
 		alloc_t to = MACRO_MIN(new_size, MACRO_ALIGN_UP(old_size, alloc_consts.page.size));
 		if(to != old_size)
 		{
-			memset((void*) new_ptr + old_size, 0, to - old_size);
+			ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+				memset((void*) new_ptr + old_size, 0, to - old_size);
+			ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 		}
 	}
 
@@ -1398,6 +1394,11 @@ alloc_realloc_e(
 
 		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 		ALLOC_VALGRIND_RESIZE(ptr, old_size, new_size);
+
+		if(new_size > old_size && zero)
+		{
+			ALLOC_VALGRIND_DEFINE((void*) ptr + old_size, new_size - old_size);
+		}
 
 		return (void*) ptr;
 	}
