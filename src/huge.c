@@ -16,11 +16,13 @@
 
 #include <alloc/huge.h>
 #include <alloc/sync.h>
+#include <alloc/macro.h>
 #include <alloc/types.h>
 #include <alloc/atomic.h>
 #include <alloc/consts.h>
 #include <alloc/report.h>
 #include <alloc/platform.h>
+#include <alloc/red_zone.h>
 
 #include <string.h>
 #include <pthread.h>
@@ -471,6 +473,58 @@ alloc_huge_reap_due(
 }
 
 
+alloc_t
+alloc_huge_red_zone_size(
+	void
+	)
+{
+#if ALLOC_HUGE_RED_ZONE
+	return alloc_consts.red_zone.size;
+#else
+	return 0;
+#endif
+}
+
+
+alloc_t
+alloc_huge_front_size(
+	void
+	)
+{
+	return MACRO_ALIGN_UP(alloc_huge_red_zone_size(), alloc_consts.page.mask);
+}
+
+
+void
+alloc_huge_check_red_zones(
+	volatile const void* ptr,
+	alloc_t size
+	)
+{
+	alloc_t red_zone_size = alloc_huge_red_zone_size();
+	if(red_zone_size)
+	{
+		alloc_red_zone_check(ptr - red_zone_size, -1);
+		alloc_red_zone_check(ptr + size, 1);
+	}
+}
+
+
+void
+alloc_huge_init_red_zones(
+	void* ptr,
+	alloc_t size
+	)
+{
+	alloc_t red_zone_size = alloc_huge_red_zone_size();
+	if(red_zone_size)
+	{
+		alloc_red_zone_init(ptr - red_zone_size);
+		alloc_red_zone_init(ptr + size);
+	}
+}
+
+
 void*
 alloc_huge_alloc(
 	alloc_t size,
@@ -480,9 +534,12 @@ alloc_huge_alloc(
 {
 	alloc_numa_local_data_t* local = alloc_get_numa_local_data(numa);
 
+	alloc_t front_size = alloc_huge_front_size();
+	alloc_t raw_size = front_size + size + alloc_huge_red_zone_size();
+
 	sync_mtx_lock(&local->huge.mtx);
 
-	alloc_huge_node_t* node = alloc_huge_ht_pop(local, size);
+	alloc_huge_node_t* node = alloc_huge_ht_pop(local, raw_size);
 	void* result = NULL;
 
 	if(node)
@@ -497,19 +554,25 @@ alloc_huge_alloc(
 
 	if(result)
 	{
+		result += front_size;
+
 		if(zero)
 		{
 			memset(result, 0, size);
 		}
 
+		alloc_huge_init_red_zones(result, size);
 		alloc_report_virtual_alloc(size);
 
 		return result;
 	}
 
-	result = alloc_alloc_virtual_e(size, size, local->numa, 1);
+	result = alloc_alloc_virtual_e(raw_size, raw_size, local->numa, 1);
 	if(result)
 	{
+		result += front_size;
+
+		alloc_huge_init_red_zones(result, size);
 		alloc_report_virtual_alloc(size);
 	}
 
@@ -527,18 +590,24 @@ alloc_huge_free(
 	alloc_numa_local_data_t* local = alloc_get_numa_local_data(numa);
 	alloc_report_virtual_free(size);
 
+	alloc_huge_check_red_zones(ptr, size);
+
+	alloc_t front_size = alloc_huge_front_size();
+	void* raw_ptr = (void*) ptr - front_size;
+	alloc_t raw_size = front_size + size + alloc_huge_red_zone_size();
+
 	sync_mtx_lock(&local->huge.mtx);
 
 	alloc_huge_node_t* node = alloc_huge_node_get(local);
 	if(attr_unlikely(!node))
 	{
 		sync_mtx_unlock(&local->huge.mtx);
-		alloc_free_virtual_e(ptr, size);
+		alloc_free_virtual_e(raw_ptr, raw_size);
 		return;
 	}
 
-	node->ptr = (void*) ptr;
-	node->size = size;
+	node->ptr = raw_ptr;
+	node->size = raw_size;
 	node->time_of_free = alloc_huge_read_tsc();
 
 	alloc_huge_time_link(local, node);
@@ -546,4 +615,30 @@ alloc_huge_free(
 	alloc_huge_time_update_timer(local);
 
 	sync_mtx_unlock(&local->huge.mtx);
+}
+
+
+void*
+alloc_huge_realloc(
+	const volatile void* ptr,
+	alloc_t old_size,
+	alloc_t new_size
+	)
+{
+	alloc_huge_check_red_zones(ptr, old_size);
+
+	alloc_t front_size = alloc_huge_front_size();
+	alloc_t back_size = alloc_huge_red_zone_size();
+
+	void* raw_ptr = alloc_realloc_virtual_e((void*) ptr - front_size,
+		front_size + old_size + back_size, front_size + new_size + back_size);
+	if(attr_unlikely(!raw_ptr))
+	{
+		return NULL;
+	}
+
+	void* new_ptr = raw_ptr + front_size;
+	alloc_huge_init_red_zones(new_ptr, new_size);
+
+	return new_ptr;
 }

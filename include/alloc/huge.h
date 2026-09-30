@@ -49,6 +49,25 @@ alloc_huge_reap_due(
 	);
 
 
+extern alloc_t
+alloc_huge_red_zone_size(
+	void
+	);
+
+
+extern alloc_t
+alloc_huge_front_size(
+	void
+	);
+
+
+extern void
+alloc_huge_check_red_zones(
+	volatile const void* ptr,
+	alloc_t size
+	);
+
+
 extern attr_cold_fn attr_alloc_fn void*
 alloc_huge_alloc(
 	alloc_t size,
@@ -62,6 +81,14 @@ alloc_huge_free(
 	const volatile void* ptr,
 	alloc_t size,
 	uint16_t numa
+	);
+
+
+extern attr_cold_fn void*
+alloc_huge_realloc(
+	const volatile void* ptr,
+	alloc_t old_size,
+	alloc_t new_size
 	);
 
 

@@ -994,7 +994,7 @@ alloc_alloc_e(
 		ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
 			void* ptr = alloc_huge_alloc(size, zero, alloc_tls.numa);
 		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
-		ALLOC_VALGRIND_ALLOC(ptr, size, zero);
+		ALLOC_VALGRIND_HUGE_ALLOC(ptr, size, zero);
 
 		return ptr;
 	}
@@ -1184,8 +1184,12 @@ alloc_free_e(
 
 	if(attr_unlikely(alloc_is_size_virtual(size)))
 	{
-		ALLOC_VALGRIND_FREE(ptr);
-		alloc_huge_free(ptr, size, alloc_tls.numa);
+		ALLOC_VALGRIND_HUGE_FREE(ptr);
+
+		ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+			alloc_huge_free(ptr, size, alloc_tls.numa);
+		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
+
 		return;
 	}
 
@@ -1269,7 +1273,10 @@ alloc_realloc_e_virtual(
 	int zero
 	)
 {
-	void* new_ptr = alloc_realloc_virtual_e(ptr, old_size, new_size);
+	ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+		void* new_ptr = alloc_huge_realloc(ptr, old_size, new_size);
+	ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
+
 	if(attr_unlikely(!new_ptr))
 	{
 		return NULL;
@@ -1280,7 +1287,8 @@ alloc_realloc_e_virtual(
 
 	if(new_size > old_size && zero)
 	{
-		alloc_t to = MACRO_MIN(new_size, MACRO_ALIGN_UP(old_size, alloc_consts.page.size));
+		alloc_t dirty_end = MACRO_ALIGN_UP(old_size + alloc_huge_red_zone_size(), alloc_consts.page.mask);
+		alloc_t to = MACRO_MIN(new_size, dirty_end);
 		if(to != old_size)
 		{
 			ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
@@ -1289,9 +1297,9 @@ alloc_realloc_e_virtual(
 		}
 	}
 
-	ALLOC_VALGRIND_FREE(ptr);
-	ALLOC_VALGRIND_ALLOC(new_ptr, new_size, zero);
-	ALLOC_VALGRIND_DEFINE(new_ptr, old_size);
+	ALLOC_VALGRIND_HUGE_FREE(ptr);
+	ALLOC_VALGRIND_HUGE_ALLOC(new_ptr, new_size, zero);
+	ALLOC_VALGRIND_DEFINE(new_ptr, MACRO_MIN(old_size, new_size));
 
 	return new_ptr;
 }
@@ -1554,10 +1562,18 @@ alloc_thread_dtor_fn(
 
 		if(attr_unlikely(
 			!alloc_consts.red_zone.size ||
-			alloc_is_bootstrap_ptr(ptr) ||
-			alloc_is_size_virtual(size)
+			alloc_is_bootstrap_ptr(ptr)
 			))
 		{
+			return;
+		}
+
+		if(attr_unlikely(alloc_is_size_virtual(size)))
+		{
+			ALLOC_VALGRIND_DISABLE_ERROR_REPORTING();
+				alloc_huge_check_red_zones(ptr, size);
+			ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
+
 			return;
 		}
 

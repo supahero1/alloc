@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <alloc/huge.h>
 #include <alloc/consts.h>
 
 #if !defined(ALLOC_RELEASE) && __has_include(<valgrind/memcheck.h>)
@@ -36,6 +37,10 @@
 	VALGRIND_MAKE_MEM_DEFINED(ptr, size)
 	#define ALLOC_VALGRIND_FREE(ptr)	\
 	VALGRIND_FREELIKE_BLOCK(ptr, alloc_consts.red_zone.size)
+	#define ALLOC_VALGRIND_HUGE_ALLOC(ptr, size, zero)	\
+	VALGRIND_MALLOCLIKE_BLOCK(ptr, size, alloc_huge_red_zone_size(), zero)
+	#define ALLOC_VALGRIND_HUGE_FREE(ptr)	\
+	VALGRIND_FREELIKE_BLOCK(ptr, alloc_huge_red_zone_size())
 	#define ALLOC_VALGRIND_INTERNAL_ALLOC(ptr, size)	\
 	VALGRIND_MALLOCLIKE_BLOCK(ptr, size, 0, 0)
 	#define ALLOC_VALGRIND_INTERNAL_FREE(ptr)	\
@@ -47,6 +52,8 @@
 	#define ALLOC_VALGRIND_RESIZE(ptr, old_size, new_size)
 	#define ALLOC_VALGRIND_DEFINE(ptr, size)
 	#define ALLOC_VALGRIND_FREE(ptr)
+	#define ALLOC_VALGRIND_HUGE_ALLOC(ptr, size, zero)
+	#define ALLOC_VALGRIND_HUGE_FREE(ptr)
 	#define ALLOC_VALGRIND_INTERNAL_ALLOC(ptr, size)
 	#define ALLOC_VALGRIND_INTERNAL_FREE(ptr)
 #endif

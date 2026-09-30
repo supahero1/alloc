@@ -30,6 +30,10 @@
 	#define ALLOC_RED_ZONE_SIZE sizeof(void*)
 #endif
 
+#ifndef ALLOC_HUGE_RED_ZONE
+	#define ALLOC_HUGE_RED_ZONE 0
+#endif
+
 #ifndef ALLOC_CONFIG_NAME
 	#define ALLOC_CONFIG_NAME "ALLOC_CONFIG"
 #endif
