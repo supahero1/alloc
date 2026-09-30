@@ -61,16 +61,12 @@ alloc_init_arena(
 	arena->free_base_blocks = alloc_consts.arena.slab_count;
 	arena->btree_avail_mask = alloc_consts.arena.btree_avail_mask_template;
 	arena->vacant_mask = 0;
-	atomic_store_rx(&arena->zombie_blocks, 0);
+	atomic_store_rx(&arena->zombie_blocks, ALLOC_ZOMBIE_BIAS);
 
 	memcpy(btree, alloc_consts.arena.btree_template, alloc_btree_size());
 	memset(vacant_next, 0, sizeof(*vacant_next) * alloc_consts.slab.class_count);
 	memset(vacant_prev, 0, sizeof(*vacant_prev) * alloc_consts.slab.class_count);
-
-	if(!clean)
-	{
-		memset(slab_headers, 0, sizeof(*slab_headers) * alloc_consts.arena.slab_count);
-	}
+	memset(slab_headers, 0, sizeof(*slab_headers) * alloc_consts.arena.slab_count);
 }
 
 
@@ -639,6 +635,8 @@ alloc_ret_arena(
 	alloc_arena_header_t* arena
 	)
 {
+	assert_eq(atomic_load_acq(&arena->zombie_blocks), 0);
+
 	alloc_tcb_deref(arena->tcb);
 
 	alloc_numa_local_data_t* local_data = alloc_get_numa_local_data(arena->numa);

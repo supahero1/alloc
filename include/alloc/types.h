@@ -65,6 +65,7 @@ typedef uint16_t alloc_block_idx_t;
 #define alloc_tid_idx(tid) ((alloc_tid_idx_t)((tid) >> (sizeof(alloc_numa_t) * 8)))
 #define alloc_make_tid(idx, numa) (((alloc_tid_t)(idx) << (sizeof(alloc_numa_t) * 8)) | (alloc_numa_t)(numa))
 #define ALLOC_DEAD_THREAD_TID ((alloc_tid_t) -1)
+#define ALLOC_ZOMBIE_BIAS ((uint32_t) 1 << 31)
 
 
 typedef struct alloc_tcb alloc_tcb_t;

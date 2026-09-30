@@ -410,7 +410,10 @@ alloc_ret_local_arena(
 		moved->local_idx = freed_idx;
 	}
 
-	alloc_ret_arena(arena);
+	if(atomic_fetch_sub_acq_rel(&arena->zombie_blocks, ALLOC_ZOMBIE_BIAS) == ALLOC_ZOMBIE_BIAS)
+	{
+		alloc_ret_arena(arena);
+	}
 }
 
 
@@ -721,7 +724,6 @@ alloc_get_local_arena(
 		arena->in_empty = 0;
 		arena->used = 0;
 		arena->vacant_mask = 0;
-		atomic_store_rx(&arena->zombie_blocks, 0);
 
 		alloc_slab_header_t* slab_base = (void*) arena + alloc_consts.arena.slab_indexable_offset;
 		memset(slab_base + alloc_consts.arena.prefix_slabs, 0, sizeof(alloc_slab_header_t) * alloc_consts.arena.slab_count);
@@ -1109,17 +1111,24 @@ alloc_free_foreign_internal(
 {
 	void* new_block = ptr;
 	void* old_free = atomic_load_acq(&slab->foreign_free);
+	uint32_t pinned = 0;
 
 	do
 	{
 		if(attr_unlikely(old_free == (void*) -1))
 		{
-			if(atomic_fetch_sub_acq_rel(&arena->zombie_blocks, 1) == 1)
+			if(atomic_fetch_sub_acq_rel(&arena->zombie_blocks, 1 + pinned) == 1 + pinned)
 			{
 				alloc_ret_arena(arena);
 			}
 
 			return;
+		}
+
+		if(!old_free && !pinned)
+		{
+			atomic_fetch_add_acq_rel(&arena->zombie_blocks, 1);
+			pinned = 1;
 		}
 
 		memcpy(ptr, &old_free, sizeof(old_free));
@@ -1136,6 +1145,11 @@ alloc_free_foreign_internal(
 			slab->foreign_next = old_head;
 		}
 		while(!atomic_exchange_weak_acq_rel(&handle->foreign_slab, &old_head, slab));
+	}
+
+	if(pinned && atomic_fetch_sub_acq_rel(&arena->zombie_blocks, 1) == 1)
+	{
+		alloc_ret_arena(arena);
 	}
 }
 
@@ -1456,7 +1470,6 @@ alloc_thread_dtor_fn(
 
 		assert_eq(arena->local_idx, i, alloc_log_error("thread_dtor(): arena header corruption detected"));
 
-		atomic_store_rel(&arena->zombie_blocks, (uint32_t) -1);
 		atomic_store_rel(&arena->tid, ALLOC_DEAD_THREAD_TID);
 
 		uint32_t total_active = 0;
@@ -1508,7 +1521,7 @@ alloc_thread_dtor_fn(
 			slab_idx += span - 1;
 		}
 
-		uint32_t bias_to_remove = (uint32_t) -1 - total_active;
+		uint32_t bias_to_remove = ALLOC_ZOMBIE_BIAS - total_active;
 		if(atomic_fetch_sub_acq_rel(&arena->zombie_blocks, bias_to_remove) == bias_to_remove)
 		{
 			alloc_ret_arena(arena);
