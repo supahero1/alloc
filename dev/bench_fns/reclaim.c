@@ -4,6 +4,8 @@
 
 #define RSS_END_TARGET_BYTES (64U * 1024U * 1024U)
 #define RECLAIM_ALLOC_SIZE 4096
+#define RECLAIM_KEEP_EVERY 8
+#define RECLAIM_DELAY_NS ((uint64_t) 1000 * 1000000)
 
 
 typedef struct bench_rss_args
@@ -14,6 +16,8 @@ typedef struct bench_rss_args
 	size_t count;
 	size_t free_count;
 	size_t live_bytes;
+	long rss_end;
+	long rss_end_delayed;
 	int metadata_oom;
 }
 bench_rss_args_t;
@@ -51,18 +55,20 @@ bench_reclaim_run(
 
 	args->rss_peak = get_rss_kb() - args->rss_baseline;
 
-	size_t free_count = count;
-	args->free_count = free_count;
+	size_t free_count = 0;
 
-	for(size_t i = 0; i < free_count; ++i)
+	for(size_t i = 0; i < count; ++i)
 	{
 		size_t idx = count - 1 - i;
-		if(ptrs[idx])
+		if(ptrs[idx] && idx % RECLAIM_KEEP_EVERY)
 		{
 			bench_free(ptrs[idx], RECLAIM_ALLOC_SIZE);
 			ptrs[idx] = NULL;
+			++free_count;
 		}
 	}
+
+	args->free_count = free_count;
 
 	size_t live_bytes = 0;
 	for(size_t i = 0; i < count; ++i)
@@ -74,6 +80,10 @@ bench_reclaim_run(
 	}
 
 	args->live_bytes = live_bytes;
+
+	args->rss_end = get_rss_kb() - args->rss_baseline;
+	thread_sleep(RECLAIM_DELAY_NS);
+	args->rss_end_delayed = get_rss_kb() - args->rss_baseline;
 
 	for(size_t i = 0; i < count; ++i)
 	{
@@ -105,8 +115,8 @@ bench_section_reclaim(
 	bench_emit_desc(
 		"reclaim",
 		"memory reclaim after heavy use",
-		"rss peak vs rss end after free",
-		"thread-based allocation surge followed by free",
+		"rss peak vs rss after partial free immediately and after 1s and after thread exit",
+		"thread-based allocation surge then free 7/8 keeping 1/8 live",
 		"metadata management and memory return to OS");
 
 	long rss_baseline = get_rss_kb();
@@ -127,18 +137,20 @@ bench_section_reclaim(
 		return;
 	}
 
-	long rss_end = get_rss_kb() - rss_baseline;
-	args.rss_peak = MACRO_MAX(args.rss_peak, rss_end);
+	long rss_exit = get_rss_kb() - rss_baseline;
+	args.rss_peak = MACRO_MAX(args.rss_peak, args.rss_end);
 
 	long thp_end = get_anon_hugepages_kb() - thp_baseline;
-	double end_live_ratio = args.live_bytes ? (double) (rss_end * 1024) / args.live_bytes : 0.0;
+	double end_live_ratio = args.live_bytes ? (double) (args.rss_end_delayed * 1024) / args.live_bytes : 0.0;
 
 	bench_log("  RECLAIM size=", (size_t) RECLAIM_ALLOC_SIZE,
 		" target=", args.target_bytes / 1024, "KB",
 		" count=", args.count,
 		" freed=", args.free_count,
 		" peak=", args.rss_peak, "KB",
-		" end=", rss_end, "KB",
+		" end=", args.rss_end, "KB",
+		" end_1s=", args.rss_end_delayed, "KB",
+		" exit=", rss_exit, "KB",
 		" live=", args.live_bytes / 1024, "KB",
 		" ratio=", end_live_ratio,
 		" thp_end=", thp_end, "KB");
@@ -148,7 +160,9 @@ bench_section_reclaim(
 		"|count=", args.count,
 		"|freed=", args.free_count,
 		"|peak=", args.rss_peak,
-		"|end=", rss_end,
+		"|end=", args.rss_end,
+		"|end_1s=", args.rss_end_delayed,
+		"|exit=", rss_exit,
 		"|live=", args.live_bytes / 1024,
 		"|end_live_ratio=", end_live_ratio,
 		"|thp_end=", thp_end);

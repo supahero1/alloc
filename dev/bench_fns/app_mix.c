@@ -3,6 +3,7 @@
 #include <alloc/atomic.h>
 
 #include <stdio.h>
+#include <string.h>
 
 
 
@@ -96,17 +97,78 @@ app_mix_touch(
 
 void
 app_mix_record(
-	uint32_t _Atomic* count,
-	uint64_t* samples,
+	app_mix_arg_t* a,
+	app_mix_kind_t kind,
 	uint64_t value
 	)
 {
-	uint32_t idx = atomic_fetch_add_rx(count, 1);
+	app_mix_reservoir_t* reservoir = &a->reservoirs[kind];
+	uint64_t seen = reservoir->seen++;
 
-	if(idx < APP_MIX_MAX_SAMPLES)
+	if(reservoir->used < APP_MIX_RESERVOIR_SLOTS)
 	{
-		samples[idx] = value;
+		reservoir->samples[reservoir->used++] = value;
+		return;
 	}
+
+	uint64_t r = ((uint64_t) fast_rand(&a->sample_seed) << 31) | fast_rand(&a->sample_seed);
+	uint64_t idx = r % (seen + 1);
+
+	if(idx < APP_MIX_RESERVOIR_SLOTS)
+	{
+		reservoir->samples[idx] = value;
+	}
+}
+
+
+void
+app_mix_free(
+	app_mix_arg_t* a,
+	void* ptr,
+	size_t size,
+	int timed,
+	int foreign
+	)
+{
+	uint64_t t0 = timed ? get_ns() : 0;
+	bench_free(ptr, size);
+
+	if(timed)
+	{
+		uint64_t elapsed = get_ns() - t0;
+
+		app_mix_record(a, APP_MIX_KIND_FREE, elapsed);
+
+		if(foreign)
+		{
+			app_mix_record(a, APP_MIX_KIND_FOREIGN_FREE, elapsed);
+		}
+	}
+
+	++a->free_ops;
+}
+
+
+void*
+app_mix_realloc(
+	app_mix_arg_t* a,
+	void* ptr,
+	size_t old_size,
+	size_t new_size,
+	int timed
+	)
+{
+	uint64_t t0 = timed ? get_ns() : 0;
+	void* p = bench_realloc(ptr, old_size, new_size, 0);
+
+	if(timed)
+	{
+		app_mix_record(a, APP_MIX_KIND_REALLOC, get_ns() - t0);
+	}
+
+	++a->realloc_ops;
+
+	return p;
 }
 
 
@@ -148,6 +210,7 @@ app_mix_thread(
 		uint32_t r = fast_rand(&seed);
 		int action = r % 100;
 		int local_idx = (r >> 8) % APP_MIX_LOCAL_SLOTS;
+		int timed = !((r >> 28) & APP_MIX_TIMED_MASK);
 
 		if(action < 38)
 		{
@@ -155,19 +218,18 @@ app_mix_thread(
 
 			if(local[local_idx].ptr)
 			{
-				uint64_t tf0 = get_ns();
-				bench_free(local[local_idx].ptr, local[local_idx].size);
-				uint64_t tf1 = get_ns();
-				app_mix_record(&ctx->free_n, ctx->free_samples, tf1 - tf0);
-				atomic_fetch_add_rx(&ctx->free_ops, 1);
+				app_mix_free(a, local[local_idx].ptr, local[local_idx].size, timed, 0);
 			}
 
-			uint64_t t0 = get_ns();
+			uint64_t t0 = timed ? get_ns() : 0;
 			void* p = bench_alloc(size, action & 1);
-			uint64_t t1 = get_ns();
 
-			app_mix_record(&ctx->alloc_n, ctx->alloc_samples, t1 - t0);
-			atomic_fetch_add_rx(&ctx->alloc_ops, 1);
+			if(timed)
+			{
+				app_mix_record(a, APP_MIX_KIND_ALLOC, get_ns() - t0);
+			}
+
+			++a->alloc_ops;
 
 			local[local_idx].ptr = p;
 			local[local_idx].size = p ? size : 0;
@@ -177,29 +239,18 @@ app_mix_thread(
 		{
 			if(local[local_idx].ptr)
 			{
-				uint64_t t0 = get_ns();
-				bench_free(local[local_idx].ptr, local[local_idx].size);
-				uint64_t t1 = get_ns();
-
-				app_mix_record(&ctx->free_n, ctx->free_samples, t1 - t0);
-				atomic_fetch_add_rx(&ctx->free_ops, 1);
+				app_mix_free(a, local[local_idx].ptr, local[local_idx].size, timed, 0);
 
 				local[local_idx].ptr = NULL;
 				local[local_idx].size = 0;
 			}
 		}
-		else if(action < 78)
+		else if(action < 78 || (action < 90 && !a->shared_enabled))
 		{
 			if(local[local_idx].ptr)
 			{
 				size_t new_size = app_mix_pick_size(&seed);
-
-				uint64_t t0 = get_ns();
-				void* p = bench_realloc(local[local_idx].ptr, local[local_idx].size, new_size, 0);
-				uint64_t t1 = get_ns();
-
-				app_mix_record(&ctx->realloc_n, ctx->realloc_samples, t1 - t0);
-				atomic_fetch_add_rx(&ctx->realloc_ops, 1);
+				void* p = app_mix_realloc(a, local[local_idx].ptr, local[local_idx].size, new_size, timed);
 
 				if(p)
 				{
@@ -211,30 +262,6 @@ app_mix_thread(
 		}
 		else if(action < 90)
 		{
-			if(!a->shared_enabled)
-			{
-				if(local[local_idx].ptr)
-				{
-					size_t new_size = app_mix_pick_size(&seed);
-
-					uint64_t t0 = get_ns();
-					void* p = bench_realloc(local[local_idx].ptr, local[local_idx].size, new_size, 0);
-					uint64_t t1 = get_ns();
-
-					app_mix_record(&ctx->realloc_n, ctx->realloc_samples, t1 - t0);
-					atomic_fetch_add_rx(&ctx->realloc_ops, 1);
-
-					if(p)
-					{
-						local[local_idx].ptr = p;
-						local[local_idx].size = new_size;
-						app_mix_touch(p, new_size, seed);
-					}
-				}
-
-				continue;
-			}
-
 			if(local[local_idx].ptr)
 			{
 				int shared_idx = fast_rand(&seed) % APP_MIX_SHARED_SLOTS;
@@ -244,13 +271,7 @@ app_mix_thread(
 
 				if(slot->ptr)
 				{
-					uint64_t t0 = get_ns();
-					bench_free(slot->ptr, slot->size);
-					uint64_t t1 = get_ns();
-
-					app_mix_record(&ctx->foreign_free_n, ctx->foreign_free_samples, t1 - t0);
-					app_mix_record(&ctx->free_n, ctx->free_samples, t1 - t0);
-					atomic_fetch_add_rx(&ctx->free_ops, 1);
+					app_mix_free(a, slot->ptr, slot->size, timed, 1);
 				}
 
 				slot->ptr = local[local_idx].ptr;
@@ -260,29 +281,21 @@ app_mix_thread(
 				local[local_idx].size = 0;
 
 				sync_mtx_unlock(&slot->mutex);
-				atomic_fetch_add_rx(&ctx->foreign_handoffs, 1);
+				++a->handoffs;
+			}
+		}
+		else if(!a->shared_enabled)
+		{
+			if(local[local_idx].ptr)
+			{
+				app_mix_free(a, local[local_idx].ptr, local[local_idx].size, timed, 0);
+
+				local[local_idx].ptr = NULL;
+				local[local_idx].size = 0;
 			}
 		}
 		else
 		{
-			if(!a->shared_enabled)
-			{
-				if(local[local_idx].ptr)
-				{
-					uint64_t t0 = get_ns();
-					bench_free(local[local_idx].ptr, local[local_idx].size);
-					uint64_t t1 = get_ns();
-
-					app_mix_record(&ctx->free_n, ctx->free_samples, t1 - t0);
-					atomic_fetch_add_rx(&ctx->free_ops, 1);
-
-					local[local_idx].ptr = NULL;
-					local[local_idx].size = 0;
-				}
-
-				continue;
-			}
-
 			int shared_idx = fast_rand(&seed) % APP_MIX_SHARED_SLOTS;
 			app_mix_slot_t* slot = &ctx->shared[shared_idx];
 
@@ -294,32 +307,19 @@ app_mix_thread(
 				{
 					if(local[local_idx].ptr)
 					{
-						uint64_t tf0 = get_ns();
-						bench_free(local[local_idx].ptr, local[local_idx].size);
-						uint64_t tf1 = get_ns();
-
-						app_mix_record(&ctx->free_n, ctx->free_samples, tf1 - tf0);
-						atomic_fetch_add_rx(&ctx->free_ops, 1);
+						app_mix_free(a, local[local_idx].ptr, local[local_idx].size, timed, 0);
 					}
 
 					local[local_idx].ptr = slot->ptr;
 					local[local_idx].size = slot->size;
-					slot->ptr = NULL;
-					slot->size = 0;
 				}
 				else
 				{
-					uint64_t t0 = get_ns();
-					bench_free(slot->ptr, slot->size);
-					uint64_t t1 = get_ns();
-
-					app_mix_record(&ctx->foreign_free_n, ctx->foreign_free_samples, t1 - t0);
-					app_mix_record(&ctx->free_n, ctx->free_samples, t1 - t0);
-					atomic_fetch_add_rx(&ctx->free_ops, 1);
-
-					slot->ptr = NULL;
-					slot->size = 0;
+					app_mix_free(a, slot->ptr, slot->size, timed, 1);
 				}
+
+				slot->ptr = NULL;
+				slot->size = 0;
 			}
 
 			sync_mtx_unlock(&slot->mutex);
@@ -332,17 +332,40 @@ app_mix_thread(
 	{
 		if(local[i].ptr)
 		{
-			uint64_t t0 = get_ns();
-			bench_free(local[i].ptr, local[i].size);
-			uint64_t t1 = get_ns();
-
-			app_mix_record(&ctx->free_n, ctx->free_samples, t1 - t0);
-			atomic_fetch_add_rx(&ctx->free_ops, 1);
+			app_mix_free(a, local[i].ptr, local[i].size, 0, 0);
 		}
 	}
 
 	a->executed_ops = i;
+}
 
+
+stats_t
+app_mix_merge_stats(
+	app_mix_arg_t* args,
+	int threads,
+	app_mix_kind_t kind
+	)
+{
+	size_t total = 0;
+	for(int i = 0; i < threads; ++i)
+	{
+		total += args[i].reservoirs[kind].used;
+	}
+
+	uint64_t* merged = malloc(sizeof(uint64_t) * (total ? total : 1));
+	size_t offset = 0;
+
+	for(int i = 0; i < threads; ++i)
+	{
+		app_mix_reservoir_t* reservoir = &args[i].reservoirs[kind];
+		memcpy(merged + offset, reservoir->samples, sizeof(uint64_t) * reservoir->used);
+		offset += reservoir->used;
+	}
+
+	stats_t s = compute_stats(merged, total);
+	free(merged);
+	return s;
 }
 
 
@@ -357,11 +380,6 @@ bench_app_mix(
 	)
 {
 	app_mix_ctx_t ctx = {0};
-
-	ctx.alloc_samples = malloc(sizeof(uint64_t) * APP_MIX_MAX_SAMPLES);
-	ctx.free_samples = malloc(sizeof(uint64_t) * APP_MIX_MAX_SAMPLES);
-	ctx.realloc_samples = malloc(sizeof(uint64_t) * APP_MIX_MAX_SAMPLES);
-	ctx.foreign_free_samples = malloc(sizeof(uint64_t) * APP_MIX_MAX_SAMPLES);
 
 	for(int i = 0; i < APP_MIX_SHARED_SLOTS; ++i)
 	{
@@ -383,15 +401,25 @@ bench_app_mix(
 		threads = APP_MIX_THREADS;
 	}
 
+	for(int i = 0; i < threads; ++i)
+	{
+		args[i] = (app_mix_arg_t){0};
+		args[i].ctx = &ctx;
+		args[i].shared_enabled = shared_enabled;
+		args[i].seed = bench_seed_derive(seed_tag, i);
+		args[i].sample_seed = bench_seed_derive(seed_tag ^ 0x5A3F1E00U, i);
+
+		for(int k = 0; k < APP_MIX_KIND__COUNT; ++k)
+		{
+			args[i].reservoirs[k].samples = malloc(sizeof(uint64_t) * APP_MIX_RESERVOIR_SLOTS);
+		}
+	}
+
 	uint64_t t0 = get_ns();
 	ctx.deadline_ns = t0 + runtime_ns;
 
 	for(int i = 0; i < threads; ++i)
 	{
-		args[i].ctx = &ctx;
-		args[i].shared_enabled = shared_enabled;
-		args[i].seed = bench_seed_derive(seed_tag, i);
-		args[i].executed_ops = 0;
 		thread_init(&workers[i], (thread_data_t){ app_mix_thread, &args[i] });
 	}
 
@@ -413,33 +441,36 @@ bench_app_mix(
 		sync_mtx_free(&ctx.shared[i].mutex);
 	}
 
-	size_t alloc_n = atomic_load_rx(&ctx.alloc_n);
-	size_t free_n = atomic_load_rx(&ctx.free_n);
-	size_t realloc_n = atomic_load_rx(&ctx.realloc_n);
-	size_t foreign_free_n = atomic_load_rx(&ctx.foreign_free_n);
-
-	alloc_n = MACRO_MIN(alloc_n, APP_MIX_MAX_SAMPLES);
-	free_n = MACRO_MIN(free_n, APP_MIX_MAX_SAMPLES);
-	realloc_n = MACRO_MIN(realloc_n, APP_MIX_MAX_SAMPLES);
-	foreign_free_n = MACRO_MIN(foreign_free_n, APP_MIX_MAX_SAMPLES);
-
-	stats_t sa = compute_stats(ctx.alloc_samples, alloc_n);
-	stats_t sf = compute_stats(ctx.free_samples, free_n);
-	stats_t sr = compute_stats(ctx.realloc_samples, realloc_n);
-	stats_t sff = compute_stats(ctx.foreign_free_samples, foreign_free_n);
-
-	uint64_t alloc_ops = atomic_load_rx(&ctx.alloc_ops);
-	uint64_t free_ops = atomic_load_rx(&ctx.free_ops);
-	uint64_t realloc_ops = atomic_load_rx(&ctx.realloc_ops);
-	uint64_t handoffs = atomic_load_rx(&ctx.foreign_handoffs);
-	uint64_t total_ops = alloc_ops + free_ops + realloc_ops;
-	double throughput = runtime_s ? total_ops / runtime_s / 1000000.0 : 0;
-
+	uint64_t alloc_ops = 0;
+	uint64_t free_ops = 0;
+	uint64_t realloc_ops = 0;
+	uint64_t handoffs = 0;
 	uint64_t total_executed = 0;
+
 	for(int i = 0; i < threads; ++i)
 	{
+		alloc_ops += args[i].alloc_ops;
+		free_ops += args[i].free_ops;
+		realloc_ops += args[i].realloc_ops;
+		handoffs += args[i].handoffs;
 		total_executed += args[i].executed_ops;
 	}
+
+	stats_t sa = app_mix_merge_stats(args, threads, APP_MIX_KIND_ALLOC);
+	stats_t sf = app_mix_merge_stats(args, threads, APP_MIX_KIND_FREE);
+	stats_t sr = app_mix_merge_stats(args, threads, APP_MIX_KIND_REALLOC);
+	stats_t sff = app_mix_merge_stats(args, threads, APP_MIX_KIND_FOREIGN_FREE);
+
+	for(int i = 0; i < threads; ++i)
+	{
+		for(int k = 0; k < APP_MIX_KIND__COUNT; ++k)
+		{
+			free(args[i].reservoirs[k].samples);
+		}
+	}
+
+	uint64_t total_ops = alloc_ops + free_ops + realloc_ops;
+	double throughput = runtime_s ? total_ops / runtime_s / 1000000.0 : 0;
 	uint64_t ops_per_thread = threads ? total_executed / threads : 0;
 
 	if(shared_enabled)
@@ -475,9 +506,4 @@ bench_app_mix(
 		snprintf(label, sizeof(label), "%s foreign_free", stats_prefix);
 		print_stats(label, &sff);
 	}
-
-	free(ctx.alloc_samples);
-	free(ctx.free_samples);
-	free(ctx.realloc_samples);
-	free(ctx.foreign_free_samples);
 }

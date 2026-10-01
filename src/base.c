@@ -66,12 +66,14 @@ typedef struct alloc_tls
 	alloc_numa_t numa;
 	alloc_numa_local_data_t* numa_data;
 	uint64_t _Atomic* numa_data_timer;
+	alloc_t huge_check_countdown;
 
 	struct
 	{
 		alloc_arena_header_t** ptr;
 		alloc_arena_idx_t used;
 		alloc_arena_idx_t size;
+		alloc_arena_header_t* inline_ptr[ALLOC_MAX_ARENA_INLINE_PER_THREAD];
 		alloc_arena_header_t* vacant_head[ALLOC_MAX_SLAB_CLASSES];
 		alloc_empty_t empty;
 	}
@@ -112,6 +114,13 @@ alloc_tls_init(
 	alloc_tls.numa = alloc_numa_to_logical(numa);
 	alloc_tls.numa_data = alloc_get_numa_local_data(alloc_tls.numa);
 	alloc_tls.numa_data_timer = &alloc_tls.numa_data->huge.timer;
+	alloc_tls.huge_check_countdown = 1;
+
+	alloc_t inline_per_thread = alloc_consts.arena.inline_per_thread;
+	assert_le(inline_per_thread, ALLOC_MAX_ARENA_INLINE_PER_THREAD);
+
+	alloc_tls.arenas.ptr = alloc_tls.arenas.inline_ptr;
+	alloc_tls.arenas.size = inline_per_thread;
 
 	alloc_tls.tcb = alloc_tcb_acquire(alloc_tls.numa);
 	alloc_tls.tid = alloc_tls.tcb->tid;
@@ -512,6 +521,28 @@ alloc_handle_ret_empty_slab(
 }
 
 
+attr_cold_fn attr_noinline void
+alloc_huge_check_slow(
+	void
+	)
+{
+	alloc_tls.huge_check_countdown = alloc_consts.huge.check_period;
+	alloc_huge_maintenance(alloc_tls.numa, alloc_tls.numa_data_timer);
+}
+
+
+attr_inline void
+alloc_huge_check(
+	void
+	)
+{
+	if(attr_unlikely(!--alloc_tls.huge_check_countdown))
+	{
+		alloc_huge_check_slow();
+	}
+}
+
+
 bool
 alloc_is_size_virtual(
 	alloc_t size
@@ -684,8 +715,19 @@ alloc_get_new_local_arena(
 		alloc_arena_idx_t new_size = (alloc_tls.arenas.size << 1) | 3;
 		assert_neq(new_size, alloc_tls.arenas.size);
 
-		alloc_arena_header_t** new_ptr = alloc_realloc_virtual(alloc_tls.arenas.ptr, alloc_tls.arenas.size, new_size);
-		assert_not_null(new_ptr);
+		alloc_arena_header_t** new_ptr;
+		if(alloc_tls.arenas.ptr == alloc_tls.arenas.inline_ptr)
+		{
+			new_ptr = alloc_alloc_virtual(new_ptr, new_size, -1, -1, 0);
+			assert_not_null(new_ptr);
+
+			memcpy(new_ptr, alloc_tls.arenas.ptr, sizeof(*new_ptr) * alloc_tls.arenas.size);
+		}
+		else
+		{
+			new_ptr = alloc_realloc_virtual(alloc_tls.arenas.ptr, alloc_tls.arenas.size, new_size);
+			assert_not_null(new_ptr);
+		}
 
 		alloc_tls.arenas.ptr = new_ptr;
 		alloc_tls.arenas.size = new_size;
@@ -987,7 +1029,7 @@ alloc_alloc_e(
 	}
 
 	alloc_ensure_tls();
-	alloc_huge_maintenance(alloc_tls.numa, alloc_tls.numa_data_timer);
+	alloc_huge_check();
 
 	if(attr_unlikely(alloc_is_size_virtual(size)))
 	{
@@ -1180,7 +1222,7 @@ alloc_free_e(
 	alloc_log_debug("free(): ptr=", ptr, " size=", size, " tid=", alloc_tls.tid);
 
 	alloc_ensure_tls();
-	alloc_huge_maintenance(alloc_tls.numa, alloc_tls.numa_data_timer);
+	alloc_huge_check();
 
 	if(attr_unlikely(alloc_is_size_virtual(size)))
 	{
@@ -1216,7 +1258,7 @@ alloc_free_e(
 
 	bool is_own = atomic_load_acq(&arena->tid) == alloc_tls.tid;
 
-	if(is_own && alloc_tcache_try_push_handle(handle_idx, handle, (void*) ptr))
+	if(attr_likely(is_own) && alloc_tcache_try_push_handle(handle_idx, handle, (void*) ptr))
 	{
 		ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 		ALLOC_VALGRIND_FREE(ptr);
@@ -1538,7 +1580,10 @@ alloc_thread_dtor_fn(
 
 	ALLOC_VALGRIND_ENABLE_ERROR_REPORTING();
 
-	alloc_free_virtual(alloc_tls.arenas.ptr, alloc_tls.arenas.size);
+	if(alloc_tls.arenas.ptr != alloc_tls.arenas.inline_ptr)
+	{
+		alloc_free_virtual(alloc_tls.arenas.ptr, alloc_tls.arenas.size);
+	}
 	alloc_tcb_deref(alloc_tls.tcb);
 	alloc_tls.handles = NULL;
 

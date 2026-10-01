@@ -37,6 +37,37 @@ bench_malloc(
 		ptrs[i] = bench_alloc(alloc_size, 0);
 		uint64_t t1 = get_ns();
 		samples[i] = t1 - t0;
+		bench_touch(ptrs[i], alloc_size);
+	}
+
+	for(int i = 0; i < n; ++i)
+	{
+		bench_free(ptrs[i], alloc_size);
+	}
+
+	stats_t s = compute_stats(samples, n);
+	free(ptrs);
+	free(samples);
+	return s;
+}
+
+
+stats_t
+bench_malloc_touch(
+	size_t alloc_size
+	)
+{
+	int n = bench_iters(alloc_size);
+	uint64_t* samples = malloc(sizeof(uint64_t) * n);
+	void** ptrs = malloc(sizeof(void*) * n);
+
+	for(int i = 0; i < n; ++i)
+	{
+		uint64_t t0 = get_ns();
+		ptrs[i] = bench_alloc(alloc_size, 0);
+		bench_touch(ptrs[i], alloc_size);
+		uint64_t t1 = get_ns();
+		samples[i] = t1 - t0;
 	}
 
 	for(int i = 0; i < n; ++i)
@@ -95,6 +126,7 @@ bench_aligned_malloc(
 		ptrs[i] = bench_alloc_aligned(alloc_size, 64, 0);
 		uint64_t t1 = get_ns();
 		samples[i] = t1 - t0;
+		bench_touch(ptrs[i], alloc_size);
 	}
 
 	for(int i = 0; i < n; ++i)
@@ -121,6 +153,7 @@ bench_aligned_free(
 	for(int i = 0; i < n; ++i)
 	{
 		ptrs[i] = bench_alloc_aligned(alloc_size, 64, 0);
+		bench_touch(ptrs[i], alloc_size);
 	}
 
 	for(int i = 0; i < n; ++i)
@@ -150,6 +183,7 @@ bench_free_ops(
 	for(int i = 0; i < n; ++i)
 	{
 		ptrs[i] = bench_alloc(alloc_size, 0);
+		bench_touch(ptrs[i], alloc_size);
 	}
 
 	for(int i = 0; i < n; ++i)
@@ -176,6 +210,7 @@ bench_realloc_small(
 	uint64_t* samples = malloc(sizeof(uint64_t) * n);
 
 	void* ptr = bench_alloc(base_size, 0);
+	bench_touch(ptr, base_size);
 	size_t cur_size = base_size;
 	uint32_t seed = bench_seed_derive(0x5A11A0C1U, base_size);
 
@@ -234,6 +269,7 @@ bench_realloc_grow_end(
 	for(int i = 0; i < n; ++i)
 	{
 		void* ptr = bench_alloc(base_size, 0);
+		bench_touch(ptr, base_size);
 		size_t big = base_size * 3;
 
 		uint64_t t0 = get_ns();
@@ -262,6 +298,7 @@ bench_realloc_grow_middle(
 	{
 		void* target = bench_alloc(base_size, 0);
 		void* blocker = bench_alloc(base_size, 0);
+		bench_touch(target, base_size);
 		size_t big = base_size * 3;
 
 		uint64_t t0 = get_ns();
@@ -291,6 +328,7 @@ bench_realloc_shrink(
 	{
 		size_t big = base_size * 3;
 		void* ptr = bench_alloc(big, 0);
+		bench_touch(ptr, big);
 		size_t small = base_size;
 
 		uint64_t t0 = get_ns();
@@ -319,6 +357,7 @@ bench_realloc_class_jump(
 	{
 		void* target = bench_alloc(base_size, 0);
 		void* blocker = bench_alloc(base_size, 0);
+		bench_touch(target, base_size);
 		size_t big = base_size * 8;
 
 		uint64_t t0 = get_ns();
@@ -348,6 +387,7 @@ bench_malloc_hot(
 		uint64_t t0 = get_ns();
 		void* p = bench_alloc(alloc_size, 0);
 		uint64_t t1 = get_ns();
+		bench_touch(p, alloc_size);
 		bench_free(p, alloc_size);
 		samples[i] = t1 - t0;
 	}
@@ -390,6 +430,7 @@ bench_free_hot(
 	for(int i = 0; i < BENCH_ITERS; ++i)
 	{
 		void* p = bench_alloc(alloc_size, 0);
+		bench_touch(p, alloc_size);
 		uint64_t t0 = get_ns();
 		bench_free(p, alloc_size);
 		uint64_t t1 = get_ns();
@@ -524,6 +565,19 @@ bench_run_ops_token(
 			"malloc latency across small and large sizes",
 			"malloc",
 			bench_malloc,
+			one_size,
+			1
+			);
+		return true;
+	}
+
+	if(!strcmp(kind, "malloc_touch"))
+	{
+		bench_section_ops_case(
+			"ops / malloc + first touch",
+			"malloc plus first write of every page across large sizes",
+			"malloc + first touch",
+			bench_malloc_touch,
 			one_size,
 			1
 			);

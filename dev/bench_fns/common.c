@@ -10,8 +10,6 @@
 	#include <psapi.h>
 #endif
 
-#include <alloc/platform.h>
-
 #ifdef DEV_ALLOC
 	#include <alloc/base.h>
 #elif defined(BENCH_JEMALLOC)
@@ -27,6 +25,7 @@ bench_stat_context_t bench_stat_context;
 size_t bench_stat_size;
 uint64_t bench_seed_value;
 uint32_t bench_seed_base;
+uint64_t bench_tsc_mult_q32;
 
 
 #ifdef DEV_ALLOC
@@ -243,12 +242,25 @@ uint32_t bench_seed_base;
 #endif
 
 
-uint64_t
-get_ns(
-	void
+void
+bench_touch(
+	void* ptr,
+	size_t size
 	)
 {
-	return alloc_read_time_ns();
+	if(!ptr || !size)
+	{
+		return;
+	}
+
+	volatile uint8_t* p = ptr;
+
+	for(size_t i = 0; i < size; i += BENCH_PAGE_SIZE)
+	{
+		p[i] = 1;
+	}
+
+	p[size - 1] = 1;
 }
 
 
@@ -390,6 +402,7 @@ bench_emit_stat_row(
 		"|size=", bench_stat_size,
 		"|label=", label,
 		"|mean=", s->mean,
+		"|p50=", s->p50,
 		"|stddev=", s->stddev,
 		"|p95=", s->p95,
 		"|p99=", s->p99,
@@ -501,11 +514,36 @@ bench_emit_desc(
 
 
 void
+bench_calibrate_tsc(
+	void
+	)
+{
+#if defined(__x86_64__)
+	uint64_t ns0 = alloc_read_time_ns();
+	uint64_t tsc0 = bench_read_tsc();
+
+	uint64_t ns1;
+	do
+	{
+		ns1 = alloc_read_time_ns();
+	}
+	while(ns1 - ns0 < BENCH_TSC_CALIBRATE_NS);
+
+	uint64_t tsc1 = bench_read_tsc();
+
+	bench_tsc_mult_q32 = ((ns1 - ns0) << 32) / (tsc1 - tsc0);
+#endif
+}
+
+
+void
 bench_common_init(
 	int argc,
 	char** argv
 	)
 {
+	bench_calibrate_tsc();
+
 	if(argc >= 2)
 	{
 		bench_seed_value = strtoull(argv[1], NULL, 0);

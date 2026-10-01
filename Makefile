@@ -38,14 +38,15 @@ LIB_DEV := bin/liballoc_dev.$(LIB_EXT)
 LIB_INSTRUMENTED := bin/liballoc_instrumented.$(LIB_EXT)
 LIB_DEFAULT := bin/liballoc.$(LIB_EXT)
 
-RELEASE_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG
-RELEASE_OBJDUMP_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG -g3 -ggdb
+RELEASE_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG -fno-semantic-interposition
+RELEASE_OBJDUMP_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O3 -flto -DNDEBUG -g3 -ggdb -fno-semantic-interposition
 DEBUG_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O1 -fno-lto -g3 -ggdb
 DEV_LIB_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=default -O1 -fno-lto -g3 -ggdb -fno-omit-frame-pointer
 INSTRUMENTED_CFLAGS := $(COMMON_CFLAGS) $(API_CFLAGS) -fvisibility=hidden -O1 -fno-lto -g3 -ggdb -fno-omit-frame-pointer -DNDEBUG
 
 DEV_CFLAGS := -std=$(CSTD) -march=x86-64-v3 -Wall -Wextra -Wno-address-of-packed-member -D_GNU_SOURCE -Iinclude
 DEV_BFLAGS := $(DEV_CFLAGS) -pthread
+BENCH_CFLAGS := -O2 -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free
 BENCH_EXTRA_CFLAGS ?=
 
 TEST_CHAOS_BIN := bin/test_chaos
@@ -133,19 +134,19 @@ $(TEST_CHAOS_BIN): dev/test_chaos.c $(LIB_DEV) | bin
 endif
 
 bin/bench_detailed_other_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
-	$(CC) $(filter-out $(LIB_RELEASE), $^) -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) $(COMMON_LDLIBS) -lm
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -o $@ $(DEV_BFLAGS) $(BENCH_CFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) $(COMMON_LDLIBS) -lm
 
 bin/bench_detailed_alloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
-	$(CC) $(filter-out $(LIB_RELEASE), $^) -DDEV_ALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) $(COMMON_LDLIBS) -lm
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DDEV_ALLOC -o $@ $(DEV_BFLAGS) $(BENCH_CFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) $(COMMON_LDLIBS) -lm
 
 bin/bench_detailed_jemalloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
-	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_JEMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -ljemalloc $(COMMON_LDLIBS) -lm
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_JEMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_CFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -ljemalloc $(COMMON_LDLIBS) -lm
 
 bin/bench_detailed_mimalloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
-	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_MIMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -lmimalloc $(COMMON_LDLIBS) -lm
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_MIMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_CFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -lmimalloc $(COMMON_LDLIBS) -lm
 
 bin/bench_detailed_tbbmalloc_%: dev/bench_fns/%.c dev/bench_fns/common.c dev/bench_fns/app_mix.c $(BENCH_SUPPORT_OBJS) $(LIB_RELEASE) | bin
-	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_TBBMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -ltbbmalloc_proxy -ltbbmalloc $(COMMON_LDLIBS) -lm
+	$(CC) $(filter-out $(LIB_RELEASE), $^) -DBENCH_TBBMALLOC -o $@ $(DEV_BFLAGS) $(BENCH_CFLAGS) $(BENCH_EXTRA_CFLAGS) -Lbin -lalloc_release $(RPATH_FLAG) -ltbbmalloc_proxy -ltbbmalloc $(COMMON_LDLIBS) -lm
 
 bin/platform.o: src/platform.c | bin
 	$(CC) $(RELEASE_CFLAGS) -c $< -o $@

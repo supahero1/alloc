@@ -192,6 +192,8 @@ def default_sections() -> List[str]:
 	for kind in ops_kinds_small:
 		for size in ops_sizes_small:
 			sections.append(f"ops_{kind}_{size}")
+	for size in ["4kib", "64kib", "128kib", "256kib", "512kib", "1mib"]:
+		sections.append(f"ops_malloc_touch_{size}")
 	for size in ["8b", "16b", "64b", "256b", "1kib", "4kib"]:
 		sections.append(f"ops_aligned_malloc_{size}")
 		sections.append(f"ops_aligned_free_{size}")
@@ -346,10 +348,10 @@ def run_single_bench(log_file: Path, run_bin: Path, args: List[str], extra_env: 
 			subprocess.run(strace_cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 			if strace_file.is_file() and strace_file.stat().st_size > 0:
 				for line in strace_file.read_text().splitlines():
-					if " total" in line:
+					if line.rstrip().endswith(" total"):
 						parts = line.split()
-						if len(parts) >= 3:
-							syscalls = parts[-2]
+						if len(parts) >= 5:
+							syscalls = parts[3]
 
 		if not IS_WINDOWS:
 			with open(log_file, "a") as f_out:
@@ -632,8 +634,27 @@ def cmd_bench_run(args: argparse.Namespace) -> None:
 	shutil.copy2(DEFAULT_HTML, run_dir / "report.html")
 
 	git_head: str = ""
+	git_dirty: str = ""
 	try:
 		git_head = subprocess.run(["git", "-C", str(ROOT_DIR), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+		git_status: str = subprocess.run(["git", "-C", str(ROOT_DIR), "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True).stdout
+		git_dirty = "1" if git_status.strip() else "0"
+	except Exception:
+		pass
+
+	thp_mode: str = ""
+	try:
+		thp_raw: str = Path("/sys/kernel/mm/transparent_hugepage/enabled").read_text()
+		thp_mode = thp_raw[thp_raw.index("[") + 1:thp_raw.index("]")]
+	except Exception:
+		pass
+
+	cpu_model: str = platform.processor()
+	try:
+		for line in Path("/proc/cpuinfo").read_text().splitlines():
+			if line.startswith("model name"):
+				cpu_model = line.split(":", 1)[1].strip()
+				break
 	except Exception:
 		pass
 
@@ -641,7 +662,8 @@ def cmd_bench_run(args: argparse.Namespace) -> None:
 		f.write(f"name={run_name}\ncreated_at={datetime.datetime.now().isoformat()}\n")
 		f.write(f"target={'bench_detailed_alloc_only' if args.alloc_only else 'bench_detailed'}\n")
 		f.write(f"bench_only={args.only if args.only else ''}\nalloc_only={1 if args.alloc_only else 0}\n")
-		f.write(f"good_max={args.good_max if args.good_max else ''}\ngit_head={git_head}\n")
+		f.write(f"good_max={args.good_max if args.good_max else ''}\ngit_head={git_head}\ngit_dirty={git_dirty}\n")
+		f.write(f"thp={thp_mode}\ncpu={cpu_model}\n")
 
 	status_done()
 	print(f"archived run: {run_name}")

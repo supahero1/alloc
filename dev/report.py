@@ -30,11 +30,12 @@ class MetricGoal:
 
 METRIC_SPECS = {
     "mean": ("ns", MetricGoal.MIN, "Latency central tendency."),
+    "p50": ("ns", MetricGoal.MIN, "Median latency."),
     "stddev": ("ns", MetricGoal.MIN, "Latency dispersion."),
     "p95": ("ns", MetricGoal.MIN, "Tail latency."),
     "p99": ("ns", MetricGoal.MIN, "Tail latency."),
     "p99.9": ("ns", MetricGoal.MIN, "Tail latency."),
-    "runtime": ("ms", MetricGoal.MIN, "Application mix runtime."),
+    "runtime": ("ms", MetricGoal.NEUTRAL, "Application mix runtime."),
     "throughput": ("Mops/s", MetricGoal.MAX, "Application throughput."),
     "handoffs": ("count", MetricGoal.NEUTRAL, "Workload/context counter; not a score metric."),
     "threads": ("count", MetricGoal.NEUTRAL, "Configuration/control value."),
@@ -54,7 +55,9 @@ METRIC_SPECS = {
     "thp_full": ("KiB", MetricGoal.NEUTRAL, "Anon huge pages during full load."),
     "thp_free": ("KiB", MetricGoal.NEUTRAL, "Anon huge pages after free."),
     "end": ("KiB", MetricGoal.MIN, "RSS at benchmark end-point."),
-    "end_live_ratio": ("ratio", MetricGoal.MIN, "RSS to live-bytes ratio."),
+    "end_1s": ("KiB", MetricGoal.MIN, "RSS one second after the end-point."),
+    "exit": ("KiB", MetricGoal.MIN, "RSS after everything is freed and the worker thread exited."),
+    "end_live_ratio": ("ratio", MetricGoal.MIN, "RSS one second after the end-point to live-bytes ratio."),
     "thp_end": ("KiB", MetricGoal.NEUTRAL, "Anon huge pages at end-point."),
     "frag_ratio": ("ratio", MetricGoal.MIN, "Fragmented RSS to live-bytes ratio."),
     "fragmented": ("KiB", MetricGoal.MIN, "RSS under fragmentation phase."),
@@ -209,6 +212,8 @@ def process_bench_line(line: str, allocator_idx: int, rows: Dict[Tuple[str, str]
         test = f"reclaim {format_size_compact(kv.get('size', '?'))} / reclaim"
         add_metric_with_fallback(rows, allocator_idx, test, "peak", kv, "peak", "peak_kb")
         add_metric_with_fallback(rows, allocator_idx, test, "end", kv, "end", "end_kb")
+        add_metric_with_fallback(rows, allocator_idx, test, "end_1s", kv, "end_1s")
+        add_metric_with_fallback(rows, allocator_idx, test, "exit", kv, "exit")
         add_metric_with_fallback(rows, allocator_idx, test, "live", kv, "live", "live_kb")
         add_metric_with_fallback(rows, allocator_idx, test, "end_live_ratio", kv, "end_live_ratio")
         add_metric_with_fallback(rows, allocator_idx, test, "thp_end", kv, "thp_end", "thp_end_kb")
@@ -284,6 +289,7 @@ def process_bench_line(line: str, allocator_idx: int, rows: Dict[Tuple[str, str]
             test = f"{ctx} / {label}"
 
         add_metric_with_fallback(rows, allocator_idx, test, "mean", kv, "mean", "mean_ns")
+        add_metric_with_fallback(rows, allocator_idx, test, "p50", kv, "p50")
         add_metric_with_fallback(rows, allocator_idx, test, "stddev", kv, "stddev", "stddev_ns")
         add_metric_with_fallback(rows, allocator_idx, test, "p95", kv, "p95", "p95_ns")
         add_metric_with_fallback(rows, allocator_idx, test, "p99", kv, "p99", "p99_ns")

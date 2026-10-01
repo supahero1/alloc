@@ -79,6 +79,7 @@ typedef struct attr_aligned(4096) alloc_consts
 		alloc_t calibrate_ns;
 		alloc_t threshold_ms;
 		alloc_t threshold_ns;
+		alloc_t check_period;
 		alloc_t slots;
 		alloc_t slots_mask;
 		alloc_t slots_shift;
@@ -108,6 +109,7 @@ typedef struct attr_aligned(4096) alloc_consts
 		alloc_t shift;
 		alloc_t virtual_capacity;
 		alloc_t max_free_per_thread;
+		alloc_t inline_per_thread;
 		alloc_t preallocate;
 		alloc_t commit_batch;
 		alloc_t thp_enable;
@@ -245,7 +247,9 @@ typedef struct alloc_config
 	alloc_t report_enable;
 	alloc_t report_per_thread_enable;
 	alloc_t huge_threshold_ms;
+	alloc_t huge_check_period;
 	alloc_t arena_max_free_per_thread;
+	alloc_t arena_inline_per_thread;
 	alloc_t arena_commit_batch;
 	alloc_t arena_tail_decommit_enable;
 	alloc_t arena_tail_decommit_trigger_div;
@@ -272,7 +276,9 @@ typedef struct alloc_config
 	alloc_t report_enable_set:1;
 	alloc_t report_per_thread_enable_set:1;
 	alloc_t huge_threshold_ms_set:1;
+	alloc_t huge_check_period_set:1;
 	alloc_t arena_max_free_per_thread_set:1;
+	alloc_t arena_inline_per_thread_set:1;
 	alloc_t arena_commit_batch_set:1;
 	alloc_t arena_tail_decommit_enable_set:1;
 	alloc_t arena_tail_decommit_trigger_div_set:1;

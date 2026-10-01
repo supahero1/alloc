@@ -5,9 +5,14 @@
 #include <unistd.h>
 
 #include <alloc/log.h>
+#include <alloc/attr.h>
 #include <alloc/macro.h>
 #include <alloc/sync.h>
 #include <alloc/threads.h>
+#include <alloc/platform.h>
+
+#define BENCH_PAGE_SIZE 4096
+#define BENCH_TSC_CALIBRATE_NS ((uint64_t) 10 * 1000000)
 
 
 typedef enum bench_stat_context
@@ -43,6 +48,7 @@ extern bench_stat_context_t bench_stat_context;
 extern size_t bench_stat_size;
 extern uint64_t bench_seed_value;
 extern uint32_t bench_seed_base;
+extern uint64_t bench_tsc_mult_q32;
 
 
 #define BENCH_LOG_TAG "[bench]"
@@ -89,9 +95,39 @@ bench_alloc_aligned(
 	);
 
 
-extern uint64_t
+attr_inline uint64_t
+bench_read_tsc(
+	void
+	)
+{
+#if defined(__x86_64__)
+	uint32_t lo;
+	uint32_t hi;
+	__asm__ volatile("lfence\n\trdtsc" : "=a"(lo), "=d"(hi) : : "memory");
+	return ((uint64_t) hi << 32) | lo;
+#else
+	return alloc_read_time_ns();
+#endif
+}
+
+
+attr_inline uint64_t
 get_ns(
 	void
+	)
+{
+#if defined(__x86_64__)
+	return ((unsigned __int128) bench_read_tsc() * bench_tsc_mult_q32) >> 32;
+#else
+	return alloc_read_time_ns();
+#endif
+}
+
+
+extern void
+bench_touch(
+	void* ptr,
+	size_t size
 	);
 
 

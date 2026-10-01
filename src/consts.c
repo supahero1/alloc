@@ -80,6 +80,7 @@ const alloc_consts_t alloc_defaults =
 	{
 		.calibrate_ms = 50,
 		.threshold_ms = 1000,
+		.check_period = 64,
 		.slots = 1024
 	},
 	.arena =
@@ -87,6 +88,7 @@ const alloc_consts_t alloc_defaults =
 		.size = (alloc_t) 1 << 19,
 		.virtual_capacity = (alloc_t) 1 << (MACRO_BITS(void*) > 32 ? 14 : 10),
 		.max_free_per_thread = 4,
+		.inline_per_thread = 8,
 		.preallocate = 16,
 		.commit_batch = 8,
 		.thp_enable = 1,
@@ -135,10 +137,12 @@ typedef struct alloc_env
 	alloc_t bootstrap_reserve_size;
 	alloc_t huge_calibrate_ms;
 	alloc_t huge_threshold_ms;
+	alloc_t huge_check_period;
 	alloc_t huge_slots;
 	alloc_t arena_size;
 	alloc_t arena_virtual_capacity;
 	alloc_t arena_max_free_per_thread;
+	alloc_t arena_inline_per_thread;
 	alloc_t arena_preallocate;
 	alloc_t arena_commit_batch;
 	alloc_t arena_thp_enable;
@@ -173,10 +177,12 @@ typedef struct alloc_env
 	alloc_t bootstrap_reserve_size_set:1;
 	alloc_t huge_calibrate_ms_set:1;
 	alloc_t huge_threshold_ms_set:1;
+	alloc_t huge_check_period_set:1;
 	alloc_t huge_slots_set:1;
 	alloc_t arena_size_set:1;
 	alloc_t arena_virtual_capacity_set:1;
 	alloc_t arena_max_free_per_thread_set:1;
+	alloc_t arena_inline_per_thread_set:1;
 	alloc_t arena_preallocate_set:1;
 	alloc_t arena_commit_batch_set:1;
 	alloc_t arena_thp_enable_set:1;
@@ -211,10 +217,12 @@ typedef struct alloc_env
 	alloc_t bootstrap_reserve_size_ignored:1;
 	alloc_t huge_calibrate_ms_ignored:1;
 	alloc_t huge_threshold_ms_ignored:1;
+	alloc_t huge_check_period_ignored:1;
 	alloc_t huge_slots_ignored:1;
 	alloc_t arena_size_ignored:1;
 	alloc_t arena_virtual_capacity_ignored:1;
 	alloc_t arena_max_free_per_thread_ignored:1;
+	alloc_t arena_inline_per_thread_ignored:1;
 	alloc_t arena_preallocate_ignored:1;
 	alloc_t arena_commit_batch_ignored:1;
 	alloc_t arena_thp_enable_ignored:1;
@@ -305,10 +313,12 @@ alloc_parse_env(
 		ALLOC_PARSE(bootstrap_reserve_size)
 		ALLOC_PARSE(huge_calibrate_ms)
 		ALLOC_PARSE(huge_threshold_ms)
+		ALLOC_PARSE(huge_check_period)
 		ALLOC_PARSE(huge_slots)
 		ALLOC_PARSE(arena_size)
 		ALLOC_PARSE(arena_virtual_capacity)
 		ALLOC_PARSE(arena_max_free_per_thread)
+		ALLOC_PARSE(arena_inline_per_thread)
 		ALLOC_PARSE(arena_preallocate)
 		ALLOC_PARSE(arena_commit_batch)
 		ALLOC_PARSE(arena_thp_enable)
@@ -396,6 +406,7 @@ alloc_validate_env(
 	ALLOC_VALIDATE(bootstrap_reserve_size, env->bootstrap_reserve_size)
 	ALLOC_VALIDATE(huge_calibrate_ms, env->huge_calibrate_ms && env->huge_calibrate_ms <= 60000)
 	ALLOC_VALIDATE(huge_threshold_ms, env->huge_threshold_ms && env->huge_threshold_ms <= 86400000)
+	ALLOC_VALIDATE(huge_check_period, env->huge_check_period && env->huge_check_period <= (alloc_t) 1 << 20)
 	ALLOC_VALIDATE(huge_slots, env->huge_slots && env->huge_slots <= (alloc_t) 1 << 20)
 	ALLOC_ENSURE_PO2(huge_slots)
 	ALLOC_VALIDATE(arena_size, env->arena_size && env->arena_size <= (alloc_t) 1 << 30)
@@ -403,6 +414,7 @@ alloc_validate_env(
 	ALLOC_VALIDATE(arena_virtual_capacity, env->arena_virtual_capacity && env->arena_virtual_capacity <= (alloc_t) 1 << 20)
 	ALLOC_ENSURE_PO2(arena_virtual_capacity)
 	ALLOC_VALIDATE(arena_max_free_per_thread, env->arena_max_free_per_thread && env->arena_max_free_per_thread <= ALLOC_MAX_ARENA_FREE_PER_THREAD)
+	ALLOC_VALIDATE(arena_inline_per_thread, env->arena_inline_per_thread <= ALLOC_MAX_ARENA_INLINE_PER_THREAD)
 	ALLOC_VALIDATE(arena_preallocate, env->arena_preallocate && env->arena_preallocate <= (alloc_t) 1 << 20)
 	ALLOC_VALIDATE(arena_commit_batch, env->arena_commit_batch && env->arena_commit_batch <= (alloc_t) 1 << 16)
 	ALLOC_VALIDATE(arena_thp_enable, env->arena_thp_enable <= 1)
@@ -505,10 +517,12 @@ alloc_log_ignored(
 	ALLOC_LOG_IGNORED(bootstrap_reserve_size)
 	ALLOC_LOG_IGNORED(huge_calibrate_ms)
 	ALLOC_LOG_IGNORED(huge_threshold_ms)
+	ALLOC_LOG_IGNORED(huge_check_period)
 	ALLOC_LOG_IGNORED(huge_slots)
 	ALLOC_LOG_IGNORED(arena_size)
 	ALLOC_LOG_IGNORED(arena_virtual_capacity)
 	ALLOC_LOG_IGNORED(arena_max_free_per_thread)
+	ALLOC_LOG_IGNORED(arena_inline_per_thread)
 	ALLOC_LOG_IGNORED(arena_preallocate)
 	ALLOC_LOG_IGNORED(arena_commit_batch)
 	ALLOC_LOG_IGNORED(arena_thp_enable)
@@ -821,6 +835,7 @@ alloc_log_consts_dump(
 		"\n\t{"
 		"\n\t\t.calibrate_ms = ", alloc_consts.huge.calibrate_ms, ","
 		"\n\t\t.threshold_ms = ", alloc_consts.huge.threshold_ms, ","
+		"\n\t\t.check_period = ", alloc_consts.huge.check_period, ","
 		"\n\t\t.slots = ", alloc_consts.huge.slots, ","
 		"\n\t\t.slots_shift = ", alloc_consts.huge.slots_shift,
 		"\n\t},"
@@ -840,6 +855,7 @@ alloc_log_consts_dump(
 		"\n\t\t.shift = ", alloc_consts.arena.shift, ","
 		"\n\t\t.virtual_capacity = ", alloc_consts.arena.virtual_capacity, ","
 		"\n\t\t.max_free_per_thread = ", alloc_consts.arena.max_free_per_thread, ","
+		"\n\t\t.inline_per_thread = ", alloc_consts.arena.inline_per_thread, ","
 		"\n\t\t.preallocate = ", alloc_consts.arena.preallocate, ","
 		"\n\t\t.commit_batch = ", alloc_consts.arena.commit_batch, ","
 		"\n\t\t.thp_enable = ", alloc_consts.arena.thp_enable, ","
@@ -953,6 +969,7 @@ alloc_init(
 	alloc_consts.huge.calibrate_ns = alloc_consts.huge.calibrate_ms * 1000000;
 	alloc_consts.huge.threshold_ms = CHOOSE(huge_threshold_ms, alloc_defaults.huge.threshold_ms);
 	alloc_consts.huge.threshold_ns = alloc_consts.huge.threshold_ms * 1000000;
+	alloc_consts.huge.check_period = CHOOSE(huge_check_period, alloc_defaults.huge.check_period);
 	alloc_consts.huge.slots = CHOOSE(huge_slots, alloc_defaults.huge.slots);
 	alloc_consts.huge.slots_mask = alloc_consts.huge.slots - 1;
 	alloc_consts.huge.slots_shift = MACRO_FLOOR_LOG2(alloc_consts.huge.slots);
@@ -985,6 +1002,7 @@ alloc_init(
 	alloc_consts.arena.virtual_capacity = CHOOSE(arena_virtual_capacity, alloc_defaults.arena.virtual_capacity);
 	hard_assert_true(MACRO_IS_POWER_OF_2(alloc_consts.arena.virtual_capacity));
 	alloc_consts.arena.max_free_per_thread = CHOOSE(arena_max_free_per_thread, alloc_defaults.arena.max_free_per_thread);
+	alloc_consts.arena.inline_per_thread = CHOOSE(arena_inline_per_thread, alloc_defaults.arena.inline_per_thread);
 	alloc_consts.arena.preallocate = CHOOSE(arena_preallocate, alloc_defaults.arena.preallocate);
 	hard_assert_le(alloc_consts.arena.preallocate, alloc_consts.arena.virtual_capacity);
 	alloc_consts.arena.commit_batch = CHOOSE(arena_commit_batch, alloc_defaults.arena.commit_batch);
@@ -1251,12 +1269,27 @@ alloc_configure(
 		alloc_consts.huge.threshold_ns = alloc_consts.huge.threshold_ms * 1000000;
 	}
 
+	ALLOC_CONFIG_VALIDATE(huge_check_period,
+		config->huge_check_period &&
+		config->huge_check_period <= (alloc_t) 1 << 20
+		)
+	{
+		alloc_consts.huge.check_period = config->huge_check_period;
+	}
+
 	ALLOC_CONFIG_VALIDATE(arena_max_free_per_thread,
 		config->arena_max_free_per_thread &&
 		config->arena_max_free_per_thread <= ALLOC_MAX_ARENA_FREE_PER_THREAD
 		)
 	{
 		alloc_consts.arena.max_free_per_thread = config->arena_max_free_per_thread;
+	}
+
+	ALLOC_CONFIG_VALIDATE(arena_inline_per_thread,
+		config->arena_inline_per_thread <= ALLOC_MAX_ARENA_INLINE_PER_THREAD
+		)
+	{
+		alloc_consts.arena.inline_per_thread = config->arena_inline_per_thread;
 	}
 
 	ALLOC_CONFIG_VALIDATE(arena_commit_batch,
