@@ -30,8 +30,8 @@ class MetricGoal:
 
 METRIC_SPECS = {
     "mean": ("ns", MetricGoal.MIN, "Latency central tendency."),
-    "p50": ("ns", MetricGoal.MIN, "Median latency."),
     "stddev": ("ns", MetricGoal.MIN, "Latency dispersion."),
+    "p50": ("ns", MetricGoal.MIN, "Median latency."),
     "p95": ("ns", MetricGoal.MIN, "Tail latency."),
     "p99": ("ns", MetricGoal.MIN, "Tail latency."),
     "p99.9": ("ns", MetricGoal.MIN, "Tail latency."),
@@ -289,8 +289,8 @@ def process_bench_line(line: str, allocator_idx: int, rows: Dict[Tuple[str, str]
             test = f"{ctx} / {label}"
 
         add_metric_with_fallback(rows, allocator_idx, test, "mean", kv, "mean", "mean_ns")
-        add_metric_with_fallback(rows, allocator_idx, test, "p50", kv, "p50")
         add_metric_with_fallback(rows, allocator_idx, test, "stddev", kv, "stddev", "stddev_ns")
+        add_metric_with_fallback(rows, allocator_idx, test, "p50", kv, "p50")
         add_metric_with_fallback(rows, allocator_idx, test, "p95", kv, "p95", "p95_ns")
         add_metric_with_fallback(rows, allocator_idx, test, "p99", kv, "p99", "p99_ns")
         add_metric_with_fallback(rows, allocator_idx, test, "p99.9", kv, "p99_9", "p99_9_ns")

@@ -402,8 +402,8 @@ bench_emit_stat_row(
 		"|size=", bench_stat_size,
 		"|label=", label,
 		"|mean=", s->mean,
-		"|p50=", s->p50,
 		"|stddev=", s->stddev,
+		"|p50=", s->p50,
 		"|p95=", s->p95,
 		"|p99=", s->p99,
 		"|p99.9=", s->p999);
