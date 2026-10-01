@@ -1,0 +1,42 @@
+[package]
+name = "shalloc"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["supahero1", "Aspect"]
+description = "Rust global allocator backed by supahero1's alloc, a fast general-purpose allocator written in C"
+license = "Apache-2.0"
+repository = "https://github.com/supahero1/alloc"
+readme = "rust/README.md"
+homepage = "https://github.com/supahero1/alloc"
+keywords = ["allocator", "memory-management", "global-allocator", "malloc"]
+categories = ["memory-management", "api-bindings"]
+links = "shalloc"
+build = "rust/build.rs"
+include = [
+	"/Cargo.toml",
+	"/rustfmt.toml",
+	"/LICENSE",
+	"/rust/README.md",
+	"/include/alloc/*.h",
+	"/src/*.c",
+	"/rust/**/*.rs",
+]
+
+[lib]
+path = "rust/lib.rs"
+
+[[example]]
+name = "bench"
+path = "rust/examples/bench.rs"
+
+[[test]]
+name = "global"
+path = "rust/tests/global.rs"
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1

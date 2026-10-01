@@ -142,12 +142,20 @@ _Generic(x,						\
 
 	#include <immintrin.h>
 
-	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
-	#define MACRO_CLZ_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _lzcnt_u32, _lzcnt_u64)(x)
-	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
-	#define MACRO_CTZ_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _tzcnt_u32, _tzcnt_u64)(x)
-	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
-	#define MACRO_POPCOUNT_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _mm_popcnt_u32, _mm_popcnt_u64)(x)
+	#ifdef __LZCNT__
+		/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
+		#define MACRO_CLZ_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _lzcnt_u32, _lzcnt_u64)(x)
+	#endif
+
+	#ifdef __BMI__
+		/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
+		#define MACRO_CTZ_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _tzcnt_u32, _tzcnt_u64)(x)
+	#endif
+
+	#ifdef __POPCNT__
+		/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
+		#define MACRO_POPCOUNT_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _mm_popcnt_u32, _mm_popcnt_u64)(x)
+	#endif
 
 #elif defined(__aarch64__) || defined(__arm__)
 
@@ -170,6 +178,41 @@ _Generic(x,						\
 	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
 	#define MACRO_POPCOUNT_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, __builtin_popcount, __builtin_popcountll)(x)
 
+#endif
+
+#ifndef MACRO_CLZ_NOCONST
+	attr_inline uint32_t _macro_clz32(uint32_t x)
+	{
+		return x ? __builtin_clz(x) : 32;
+	}
+
+	attr_inline uint64_t _macro_clz64(uint64_t x)
+	{
+		return x ? __builtin_clzll(x) : 64;
+	}
+
+	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
+	#define MACRO_CLZ_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _macro_clz32, _macro_clz64)(x)
+#endif
+
+#ifndef MACRO_CTZ_NOCONST
+	attr_inline uint32_t _macro_ctz32(uint32_t x)
+	{
+		return x ? __builtin_ctz(x) : 32;
+	}
+
+	attr_inline uint64_t _macro_ctz64(uint64_t x)
+	{
+		return x ? __builtin_ctzll(x) : 64;
+	}
+
+	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
+	#define MACRO_CTZ_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, _macro_ctz32, _macro_ctz64)(x)
+#endif
+
+#ifndef MACRO_POPCOUNT_NOCONST
+	/* NOLINTNEXTLINE(bugprone-sizeof-expression) */
+	#define MACRO_POPCOUNT_NOCONST(x) MACRO_CHOOSE(sizeof(x) <= 4, __builtin_popcount, __builtin_popcountll)(x)
 #endif
 
 /* NOLINTNEXTLINE(bugprone-sizeof-expression) */
