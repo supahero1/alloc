@@ -1329,7 +1329,7 @@ alloc_realloc_e_virtual(
 
 	if(new_size > old_size && zero)
 	{
-		alloc_t dirty_end = MACRO_ALIGN_UP(old_size + alloc_huge_red_zone_size(), alloc_consts.page.mask);
+		alloc_t dirty_end = MACRO_ALIGN_UP(alloc_huge_raw_size(old_size) - alloc_huge_front_size(), alloc_consts.page.mask);
 		alloc_t to = MACRO_MIN(new_size, dirty_end);
 		if(to != old_size)
 		{

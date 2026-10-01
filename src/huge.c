@@ -495,6 +495,23 @@ alloc_huge_front_size(
 }
 
 
+alloc_t
+alloc_huge_raw_size(
+	alloc_t size
+	)
+{
+	alloc_t raw_size = alloc_huge_front_size() + size + alloc_huge_red_zone_size();
+	alloc_t huge_page_size = alloc_consts.huge_page.size;
+
+	if(huge_page_size && raw_size >= huge_page_size)
+	{
+		raw_size = MACRO_ALIGN_UP(raw_size, huge_page_size - 1);
+	}
+
+	return raw_size;
+}
+
+
 void
 alloc_huge_check_red_zones(
 	volatile const void* ptr,
@@ -535,7 +552,7 @@ alloc_huge_alloc(
 	alloc_numa_local_data_t* local = alloc_get_numa_local_data(numa);
 
 	alloc_t front_size = alloc_huge_front_size();
-	alloc_t raw_size = front_size + size + alloc_huge_red_zone_size();
+	alloc_t raw_size = alloc_huge_raw_size(size);
 
 	sync_mtx_lock(&local->huge.mtx);
 
@@ -594,7 +611,7 @@ alloc_huge_free(
 
 	alloc_t front_size = alloc_huge_front_size();
 	void* raw_ptr = (void*) ptr - front_size;
-	alloc_t raw_size = front_size + size + alloc_huge_red_zone_size();
+	alloc_t raw_size = alloc_huge_raw_size(size);
 
 	sync_mtx_lock(&local->huge.mtx);
 
@@ -628,10 +645,9 @@ alloc_huge_realloc(
 	alloc_huge_check_red_zones(ptr, old_size);
 
 	alloc_t front_size = alloc_huge_front_size();
-	alloc_t back_size = alloc_huge_red_zone_size();
 
 	void* raw_ptr = alloc_realloc_virtual_e((void*) ptr - front_size,
-		front_size + old_size + back_size, front_size + new_size + back_size);
+		alloc_huge_raw_size(old_size), alloc_huge_raw_size(new_size));
 	if(attr_unlikely(!raw_ptr))
 	{
 		return NULL;

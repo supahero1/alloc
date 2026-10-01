@@ -61,6 +61,12 @@ alloc_huge_front_size(
 	);
 
 
+extern alloc_t
+alloc_huge_raw_size(
+	alloc_t size
+	);
+
+
 extern void
 alloc_huge_check_red_zones(
 	volatile const void* ptr,
