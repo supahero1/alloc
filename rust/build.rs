@@ -4,6 +4,10 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
+	if env::var("DOCS_RS").is_ok() {
+		return;
+	}
+
 	let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 	let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 	let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
